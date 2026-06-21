@@ -163,6 +163,50 @@ export type Database = {
         }
         Relationships: []
       }
+      razorpay_webhook_events: {
+        Row: {
+          created_at: string
+          event_id: string
+          event_type: string
+          id: string
+          order_id: string | null
+          payload: Json
+          processed_at: string
+          razorpay_order_id: string | null
+          razorpay_payment_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          event_type: string
+          id?: string
+          order_id?: string | null
+          payload: Json
+          processed_at?: string
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          order_id?: string | null
+          payload?: Json
+          processed_at?: string
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "razorpay_webhook_events_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reviews: {
         Row: {
           approved: boolean
