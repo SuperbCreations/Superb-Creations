@@ -11,6 +11,13 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { Header } from "@/components/site/Header";
+import { Footer } from "@/components/site/Footer";
+import { WhatsappFab } from "@/components/site/WhatsappFab";
+import { CartSheet } from "@/components/site/CartSheet";
+import { CartProvider } from "@/lib/cart";
+import { AuthProvider } from "@/lib/auth";
+import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -77,14 +84,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "Superb Creations — Quietly Elegant Women's Wear" },
+      {
+        name: "description",
+        content:
+          "Superb Creations is a women's clothing and beauty boutique — handcrafted kurta sets, dresses, sarees and cosmetics. Order on WhatsApp.",
+      },
+      { name: "author", content: "Superb Creations" },
+      { property: "og:title", content: "Superb Creations — Women's Boutique" },
+      {
+        property: "og:description",
+        content: "Quietly elegant clothing and beauty essentials for the everyday woman.",
+      },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
       {
@@ -118,8 +131,18 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <AuthProvider>
+        <CartProvider>
+          <Header />
+          <main>
+            <Outlet />
+          </main>
+          <Footer />
+          <WhatsappFab />
+          <CartSheet />
+          <Toaster position="top-center" />
+        </CartProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
