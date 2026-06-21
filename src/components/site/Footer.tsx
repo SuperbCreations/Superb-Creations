@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Instagram, Youtube } from "lucide-react";
+import { Facebook, Instagram, Youtube } from "lucide-react";
 
 export function Footer() {
   return (
@@ -29,6 +29,15 @@ export function Footer() {
               className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border transition-colors hover:bg-primary hover:text-primary-foreground"
             >
               <Youtube size={16} />
+            </a>
+            <a
+              href="https://www.facebook.com/share/1U22A7sHpi/?mibextid=wwXIfr"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Facebook"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              <Facebook size={16} />
             </a>
           </div>
         </div>
