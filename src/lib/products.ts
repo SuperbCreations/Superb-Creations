@@ -59,6 +59,7 @@ async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from("products")
     .select("*")
+    .eq("in_stock", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -77,6 +78,7 @@ export function useProduct(slug: string) {
         .from("products")
         .select("*")
         .eq("slug", slug)
+        .eq("in_stock", true)
         .maybeSingle();
       if (error) throw error;
       return data as Product | null;

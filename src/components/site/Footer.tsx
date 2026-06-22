@@ -62,9 +62,15 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-border">
-        <div className="container-boutique flex flex-col items-center justify-between gap-3 py-6 text-xs text-muted-foreground md:flex-row">
+        <div className="container-boutique flex flex-col items-center justify-between gap-4 py-6 text-xs text-muted-foreground md:flex-row">
           <p>© {new Date().getFullYear()} Superb Creations. All rights reserved.</p>
-          <p>Handcrafted in India.</p>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+            <Link to="/privacy-policy" className="hover:underline">Privacy</Link>
+            <Link to="/terms-and-conditions" className="hover:underline">Terms</Link>
+            <Link to="/shipping-policy" className="hover:underline">Shipping</Link>
+            <Link to="/return-refund-policy" className="hover:underline">Returns</Link>
+            <Link to="/support-policy" className="hover:underline">Support</Link>
+          </div>
         </div>
       </div>
     </footer>

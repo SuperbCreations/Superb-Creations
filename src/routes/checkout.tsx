@@ -4,12 +4,11 @@ import { MessageCircle, CreditCard, Loader2, LogIn } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase } from "@/integrations/supabase/client";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { inr, whatsappLink } from "@/lib/products";
 import { createRazorpayOrder, verifyRazorpayPayment } from "@/lib/razorpay.functions";
-import { sendOrderNotifications } from "@/lib/notifications.functions";
+import { createCheckoutOrder } from "@/lib/orders.functions";
 
 export const Route = createFileRoute("/checkout")({
   head: () => ({ meta: [{ title: "Checkout — Superb Creations" }] }),
@@ -37,14 +36,14 @@ function loadRazorpay(): Promise<boolean> {
 function Checkout() {
   const navigate = useNavigate();
   const { items, subtotal, clear } = useCart();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [form, setForm] = useState({ customer_name: "", phone: "", email: "", address: "" });
   const [method, setMethod] = useState<"whatsapp" | "razorpay">("whatsapp");
   const [busy, setBusy] = useState(false);
 
-  const createOrder = useServerFn(createRazorpayOrder);
+  const createOrder = useServerFn(createCheckoutOrder);
+  const createPaymentOrder = useServerFn(createRazorpayOrder);
   const verifyPayment = useServerFn(verifyRazorpayPayment);
-  const notify = useServerFn(sendOrderNotifications);
 
   const shipping = subtotal >= 2500 || subtotal === 0 ? 0 : 99;
   const total = subtotal + shipping;
@@ -52,71 +51,28 @@ function Checkout() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const saveOrder = async (paymentMethod: string) => {
-    const itemsPayload = items.map((i) => ({
-      product_id: i.product_id,
-      variant_id: i.variant_id,
-      variant_label: i.variant_label,
-      name: i.name,
-      qty: i.qty,
-      price: i.price,
-      slug: i.slug,
-    }));
-    const { data, error } = await supabase
-      .from("orders")
-      .insert({
+  const saveOrder = async (paymentMethod: "whatsapp" | "razorpay") =>
+    createOrder({
+      data: {
         customer_name: form.customer_name,
         phone: form.phone,
-        email: form.email || null,
+        email: form.email,
         address: form.address,
-        items: itemsPayload,
-        total,
         payment_method: paymentMethod,
-        user_id: user?.id ?? null,
-      })
-      .select("id")
-      .single();
-    if (error) throw error;
-    const orderId = data.id as string;
-
-    // Atomically decrement stock (will silently skip rows that no longer have enough).
-    try {
-      await supabase.rpc("decrement_stock", {
-        p_items: items.map((i) => ({
+        accessToken: session?.access_token,
+        items: items.map((i) => ({
           product_id: i.product_id,
           variant_id: i.variant_id,
           qty: i.qty,
         })),
-      });
-    } catch {
-      /* non-fatal — admin can reconcile */
-    }
-
-    // Fire-and-forget email notification (currently logs server-side; wires to email once domain is verified).
-    notify({
-      data: {
-        orderId,
-        customerName: form.customer_name,
-        customerEmail: form.email || null,
-        customerPhone: form.phone,
-        address: form.address,
-        items: itemsPayload.map((i) => ({
-          name: i.name,
-          qty: i.qty,
-          price: i.price,
-          variant_label: i.variant_label,
-        })),
-        total,
-        paymentMethod,
       },
-    }).catch(() => {});
+    });
 
-    return orderId;
-  };
-
-  const orderSummaryText = () => {
-    const lines = items.map((i) => `• ${i.name} × ${i.qty} — ${inr(i.price * i.qty)}`).join("\n");
-    return `Hi Superb Creations! I'd like to place an order:\n\n${lines}\n\nSubtotal: ${inr(subtotal)}\nShipping: ${shipping === 0 ? "Free" : inr(shipping)}\nTotal: ${inr(total)}\n\nName: ${form.customer_name}\nPhone: ${form.phone}\nAddress: ${form.address}`;
+  const orderSummaryText = (order: Awaited<ReturnType<typeof saveOrder>>) => {
+    const lines = order.items
+      .map((i) => `- ${i.name} x ${i.qty} - ${inr(i.price * i.qty)}`)
+      .join("\n");
+    return `Hi Superb Creations! I'd like to place an order:\n\n${lines}\n\nSubtotal: ${inr(order.subtotal)}\nShipping: ${order.shipping === 0 ? "Free" : inr(order.shipping)}\nTotal: ${inr(order.total)}\n\nOrder ID: ${order.orderId}\nName: ${form.customer_name}\nPhone: ${form.phone}\nAddress: ${form.address}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -132,8 +88,8 @@ function Checkout() {
     setBusy(true);
     try {
       if (method === "whatsapp") {
-        await saveOrder("whatsapp");
-        const url = whatsappLink(orderSummaryText());
+        const order = await saveOrder("whatsapp");
+        const url = whatsappLink(orderSummaryText(order));
         clear();
         window.open(url, "_blank");
         navigate({ to: "/order-success", search: { method: "whatsapp" } });
@@ -141,8 +97,8 @@ function Checkout() {
       }
 
       // Razorpay
-      const orderId = await saveOrder("razorpay");
-      const res = await createOrder({ data: { amount: total * 100, orderId } });
+      const order = await saveOrder("razorpay");
+      const res = await createPaymentOrder({ data: { orderId: order.orderId } });
       if (!res.configured) {
         toast.error(
           "Online payment isn't available yet. Please use 'Order on WhatsApp' to complete your order.",
@@ -170,7 +126,7 @@ function Checkout() {
           try {
             const v = await verifyPayment({
               data: {
-                orderId,
+                orderId: order.orderId,
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,

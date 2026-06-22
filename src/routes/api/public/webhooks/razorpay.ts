@@ -140,6 +140,13 @@ export const Route = createFileRoute("/api/public/webhooks/razorpay")({
         }
 
         if (eventType === "payment.failed") {
+          if (orderRow.payment_status === "paid") {
+            console.log(
+              "[razorpay-webhook] paid order received failed event, skipping",
+              orderRow.id,
+            );
+            return new Response("already-paid", { status: 200 });
+          }
           await supabaseAdmin
             .from("orders")
             .update({
@@ -165,21 +172,17 @@ export const Route = createFileRoute("/api/public/webhooks/razorpay")({
           return new Response("already-paid", { status: 200 });
         }
 
-        // NOTE: inventory deduction happens in the checkout flow before
-        // payment verification. We intentionally do NOT call decrement_stock
-        // here — that would double-deduct on the webhook path.
-        const { error: updateErr } = await supabaseAdmin
-          .from("orders")
-          .update({
-            payment_status: "paid",
-            status: "confirmed",
-            razorpay_payment_id: razorpayPaymentId ?? undefined,
-            razorpay_order_id: razorpayOrderId ?? undefined,
-          })
-          .eq("id", orderRow.id);
+        const { error: finalizeErr } = await (supabaseAdmin as any).rpc(
+          "finalize_razorpay_payment",
+          {
+            p_order_id: orderRow.id,
+            p_razorpay_order_id: razorpayOrderId,
+            p_razorpay_payment_id: razorpayPaymentId,
+          },
+        );
 
-        if (updateErr) {
-          console.error("[razorpay-webhook] order update failed", updateErr);
+        if (finalizeErr) {
+          console.error("[razorpay-webhook] order finalization failed", finalizeErr);
           return bad(500, "Failed to update order");
         }
 

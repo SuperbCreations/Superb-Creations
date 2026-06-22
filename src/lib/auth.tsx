@@ -8,6 +8,8 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
+const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
+
 type AuthContextValue = {
   user: User | null;
   session: Session | null;
@@ -25,20 +27,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const resolveRole = async (uid: string | undefined) => {
-      if (!uid) {
-        setIsAdmin(false);
-        return;
-      }
-      // Make sure the signed-in user has a role row (admin for the owner email).
-      await supabase.rpc("ensure_my_role");
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", uid)
-        .eq("role", "admin")
-        .maybeSingle();
-      setIsAdmin(!!data);
+    const resolveRole = (email: string | undefined) => {
+      setIsAdmin(email?.toLowerCase() === OWNER_ADMIN_EMAIL);
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
@@ -46,14 +36,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(sess?.user ?? null);
       // Defer Supabase calls to avoid deadlocks inside the callback.
       setTimeout(() => {
-        resolveRole(sess?.user?.id);
+        resolveRole(sess?.user?.email);
       }, 0);
     });
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setUser(data.session?.user ?? null);
-      resolveRole(data.session?.user?.id).finally(() => setLoading(false));
+      resolveRole(data.session?.user?.email);
+      setLoading(false);
     });
 
     return () => sub.subscription.unsubscribe();

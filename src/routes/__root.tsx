@@ -97,6 +97,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Quietly elegant clothing and beauty essentials for the everyday woman.",
       },
       { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "Superb Creations" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [

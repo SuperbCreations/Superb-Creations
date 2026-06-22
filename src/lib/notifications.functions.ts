@@ -6,16 +6,13 @@ import { z } from "zod";
  *
  * Required env vars (set via Lovable Cloud secrets — never hardcode):
  *   RESEND_API_KEY      — API key from Resend dashboard
- *   RESEND_FROM         — (optional) "Name <email@yourdomain>", defaults to
- *                         Resend's shared sandbox sender `onboarding@resend.dev`.
- *                         The shared sender works without verifying a domain
- *                         but Resend restricts it to the account owner's email
- *                         until you verify your own domain.
+ *   RESEND_FROM         — "Name <email@yourdomain>" from a verified Resend
+ *                         domain. If omitted, email is skipped with a clear
+ *                         server log so API keys never need to reach the client.
  *   ADMIN_EMAIL         — (optional) recipient for admin order notifications,
  *                         defaults to superbcreations55@gmail.com.
  */
 
-const FROM_DEFAULT = "Superb Creations <onboarding@resend.dev>";
 const ADMIN_DEFAULT = "superbcreations55@gmail.com";
 
 type ItemLine = {
@@ -37,7 +34,19 @@ async function sendResend(args: {
     console.warn("[resend] RESEND_API_KEY not set — skipping email send");
     return { ok: false as const, skipped: true as const };
   }
-  const from = process.env.RESEND_FROM || FROM_DEFAULT;
+  const from = process.env.RESEND_FROM;
+  if (!from) {
+    console.warn(
+      "[resend] RESEND_FROM not set — skipping email send. Admin fallback: monitor the Supabase orders table and WhatsApp until a verified Resend sender/domain is configured.",
+    );
+    return { ok: false as const, skipped: true as const };
+  }
+  if (from.toLowerCase().includes("onboarding@resend.dev")) {
+    console.warn(
+      "[resend] RESEND_FROM uses onboarding@resend.dev — skipping production email. Admin fallback: monitor the Supabase orders table and WhatsApp, then configure a verified Resend domain.",
+    );
+    return { ok: false as const, skipped: true as const };
+  }
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -103,7 +112,7 @@ function shell(title: string, body: string) {
   </body></html>`;
 }
 
-const notificationSchema = z.object({
+export const notificationSchema = z.object({
   orderId: z.string().uuid(),
   customerName: z.string(),
   customerEmail: z.string().email().nullable(),
@@ -121,9 +130,9 @@ const notificationSchema = z.object({
   paymentMethod: z.string(),
 });
 
-export const sendOrderNotifications = createServerFn({ method: "POST" })
-  .inputValidator((data) => notificationSchema.parse(data))
-  .handler(async ({ data }) => {
+export async function sendOrderNotificationsForOrder(
+  data: z.infer<typeof notificationSchema>,
+) {
     const adminEmail = process.env.ADMIN_EMAIL || ADMIN_DEFAULT;
     const rows = itemRows(data.items);
 
@@ -183,7 +192,11 @@ export const sendOrderNotifications = createServerFn({ method: "POST" })
       customer: customerRes.status === "fulfilled" ? customerRes.value : { ok: false, error: String(customerRes.reason) },
       emailEnabled: !!process.env.RESEND_API_KEY,
     };
-  });
+}
+
+export const sendOrderNotifications = createServerFn({ method: "POST" })
+  .inputValidator((data) => notificationSchema.parse(data))
+  .handler(async ({ data }) => sendOrderNotificationsForOrder(data));
 
 const shippedSchema = z.object({
   orderId: z.string().uuid(),

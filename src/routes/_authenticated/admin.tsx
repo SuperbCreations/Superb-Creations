@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -18,13 +19,12 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { CATEGORIES, inr, type Product, type Variant } from "@/lib/products";
+import { confirmManualOrder } from "@/lib/orders.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({ meta: [{ title: "Admin — Superb Creations" }] }),
   component: AdminPage,
 });
-
-const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
 
 const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -192,17 +192,20 @@ function ProductsAdmin() {
     if (!draft) return;
     setUploading(true);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Please upload an image file.");
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("Image must be 5MB or smaller.");
+      }
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `products/${crypto.randomUUID()}.${ext}`;
       const { error } = await supabase.storage
         .from("product-images")
         .upload(path, file, { cacheControl: "31536000", upsert: false });
       if (error) throw error;
-      const { data, error: signErr } = await supabase.storage
-        .from("product-images")
-        .createSignedUrl(path, TEN_YEARS);
-      if (signErr) throw signErr;
-      setDraft({ ...draft, image_url: data.signedUrl });
+      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+      setDraft({ ...draft, image_url: data.publicUrl });
       toast.success("Image uploaded.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed.");
@@ -416,6 +419,9 @@ function ProductsAdmin() {
 }
 
 function OrdersAdmin() {
+  const qc = useQueryClient();
+  const { session } = useAuth();
+  const confirmManualOrderFn = useServerFn(confirmManualOrder);
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["admin-orders"],
     queryFn: async () => {
@@ -426,6 +432,22 @@ function OrdersAdmin() {
       if (error) throw error;
       return data;
     },
+  });
+
+  const confirmManual = useMutation({
+    mutationFn: async (orderId: string) => {
+      if (!session?.access_token) throw new Error("Please sign in again.");
+      await confirmManualOrderFn({
+        data: { orderId, accessToken: session.access_token },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-orders"] });
+      qc.invalidateQueries({ queryKey: ["admin-products"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Order confirmed and stock updated.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not confirm order."),
   });
 
   if (isLoading) return <p className="mt-8 text-sm text-muted-foreground">Loading…</p>;
@@ -446,8 +468,18 @@ function OrdersAdmin() {
             <div className="text-right">
               <p className="font-display text-lg">{inr(o.total)}</p>
               <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">
-                {o.payment_method} · {o.payment_status}
+                {o.payment_method} · {o.payment_status} · {o.status}
               </p>
+              {o.payment_method !== "razorpay" && !o.stock_deducted_at && (
+                <button
+                  disabled={confirmManual.isPending}
+                  onClick={() => confirmManual.mutate(o.id)}
+                  className="mt-2 inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-xs"
+                >
+                  {confirmManual.isPending && <Loader2 size={12} className="animate-spin" />}
+                  Confirm order
+                </button>
+              )}
             </div>
           </div>
           <p className="mt-3 text-sm text-muted-foreground">{o.address}</p>
