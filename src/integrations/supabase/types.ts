@@ -280,6 +280,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      confirm_manual_order: { Args: { p_order_id: string }; Returns: Json }
       decrement_stock: { Args: { p_items: Json }; Returns: Json }
       ensure_my_role: { Args: never; Returns: undefined }
       has_role: {
