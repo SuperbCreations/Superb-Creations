@@ -198,12 +198,14 @@ export const confirmManualOrder = createServerFn({ method: "POST" })
     const { requireOwnerAdmin } = await import("@/lib/admin.server");
     await requireOwnerAdmin(data.accessToken);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: result, error } = await supabaseAdmin
-      .from("orders")
-      .update({ payment_status: "paid", status: "confirmed" })
-      .eq("id", data.orderId)
-      .select()
-      .single();
+    // Secure, idempotent RPC: verifies state, marks paid+confirmed,
+    // and decrements stock exactly once. Do NOT replace with a direct UPDATE.
+    const { data: result, error } = await (supabaseAdmin.rpc as unknown as (
+      fn: "confirm_manual_order",
+      args: { p_order_id: string },
+    ) => Promise<{ data: unknown; error: unknown }>)("confirm_manual_order", {
+      p_order_id: data.orderId,
+    });
     if (error) throw error;
     return result;
   });
