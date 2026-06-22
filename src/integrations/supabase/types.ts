@@ -28,7 +28,6 @@ export type Database = {
           razorpay_order_id: string | null
           razorpay_payment_id: string | null
           status: string
-          stock_deducted_at: string | null
           total: number
           user_id: string | null
         }
@@ -45,7 +44,6 @@ export type Database = {
           razorpay_order_id?: string | null
           razorpay_payment_id?: string | null
           status?: string
-          stock_deducted_at?: string | null
           total?: number
           user_id?: string | null
         }
@@ -62,7 +60,6 @@ export type Database = {
           razorpay_order_id?: string | null
           razorpay_payment_id?: string | null
           status?: string
-          stock_deducted_at?: string | null
           total?: number
           user_id?: string | null
         }
@@ -283,18 +280,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      apply_order_stock_locked: { Args: { p_order_id: string }; Returns: Json }
-      confirm_manual_order: { Args: { p_order_id: string }; Returns: Json }
       decrement_stock: { Args: { p_items: Json }; Returns: Json }
       ensure_my_role: { Args: never; Returns: undefined }
-      finalize_razorpay_payment: {
-        Args: {
-          p_order_id: string
-          p_razorpay_order_id: string | null
-          p_razorpay_payment_id: string | null
-        }
-        Returns: Json
-      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -302,7 +289,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      is_owner_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user"
