@@ -3,6 +3,7 @@ import { Menu, X, ShoppingBag, User } from "lucide-react";
 import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
+import logo from "@/assets/superb-creations-logo.png";
 
 const nav = [
   { to: "/", label: "Home" },
@@ -20,7 +21,12 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">
       <div className="container-boutique flex h-16 items-center justify-between md:h-20">
-        <Link to="/" className="flex items-baseline gap-2">
+        <Link to="/" className="flex items-center gap-3">
+          <img
+            src={logo}
+            alt="Superb Creations"
+            className="h-11 w-11 rounded-full object-cover md:h-12 md:w-12"
+          />
           <span className="font-display text-2xl tracking-tight md:text-3xl">
             Superb Creations
           </span>
