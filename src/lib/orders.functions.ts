@@ -198,9 +198,12 @@ export const confirmManualOrder = createServerFn({ method: "POST" })
     const { requireOwnerAdmin } = await import("@/lib/admin.server");
     await requireOwnerAdmin(data.accessToken);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: result, error } = await supabaseAdmin.rpc("confirm_manual_order", {
-      p_order_id: data.orderId,
-    });
+    const { data: result, error } = await supabaseAdmin
+      .from("orders")
+      .update({ payment_status: "paid", status: "confirmed" })
+      .eq("id", data.orderId)
+      .select()
+      .single();
     if (error) throw error;
     return result;
   });
