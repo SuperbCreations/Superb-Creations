@@ -3,8 +3,8 @@ import { ArrowRight, MessageCircle, Sparkles, Truck, Heart } from "lucide-react"
 import heroImg from "@/assets/hero-1.jpg";
 import collectionImg from "@/assets/collection-1.jpg";
 import cosmeticsImg from "@/assets/cosmetics.jpg";
-import lookbookImg from "@/assets/lookbook-1.jpg";
 import { useProducts, whatsappLink } from "@/lib/products";
+import { useLookbookItems } from "@/lib/lookbook";
 import { ProductCard } from "@/components/site/ProductCard";
 
 export const Route = createFileRoute("/")({
@@ -28,7 +28,9 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const { data: products = [] } = useProducts();
+  const { data: lookbookItems = [] } = useLookbookItems();
   const featured = products.slice(0, 4);
+  const lookbookPreview = lookbookItems[0];
 
   return (
     <>
@@ -73,11 +75,6 @@ function Home() {
                 fetchPriority="high"
               />
             </div>
-            <div className="absolute -bottom-6 -left-6 hidden rounded-sm bg-background px-5 py-4 shadow-soft md:block">
-              <p className="eyebrow">Featured</p>
-              <p className="mt-1 font-display text-lg">Noor Rose Suit</p>
-              <p className="text-xs text-muted-foreground">₹3,490 · Hand-embroidered</p>
-            </div>
           </div>
         </div>
 
@@ -117,6 +114,11 @@ function Home() {
             <ProductCard key={p.id} product={p} />
           ))}
         </div>
+        {featured.length === 0 && (
+          <p className="mt-10 text-center text-sm text-muted-foreground">
+            No products available yet.
+          </p>
+        )}
       </section>
 
       <section className="container-boutique grid gap-6 pb-24 md:grid-cols-2">
@@ -159,14 +161,18 @@ function Home() {
       <section className="bg-secondary/50">
         <div className="container-boutique grid items-center gap-12 py-20 md:grid-cols-2 md:py-28">
           <div className="hover-zoom order-2 aspect-[4/5] overflow-hidden md:order-1">
-            <img
-              src={lookbookImg}
-              alt="Lookbook editorial photograph"
-              loading="lazy"
-              width={1200}
-              height={1500}
-              className="h-full w-full object-cover"
-            />
+            {lookbookPreview ? (
+              <img
+                src={lookbookPreview.image_url}
+                alt={lookbookPreview.title || "Lookbook editorial photograph"}
+                loading="lazy"
+                width={1200}
+                height={1500}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="h-full w-full bg-secondary" />
+            )}
           </div>
           <div className="order-1 md:order-2 md:pl-8">
             <p className="eyebrow">Lookbook · Vol. 01</p>

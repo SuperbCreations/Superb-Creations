@@ -6,6 +6,8 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Archive,
+  RotateCcw,
   Loader2,
   LogOut,
   Upload,
@@ -19,6 +21,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { CATEGORIES, inr, type Product, type Variant } from "@/lib/products";
+import type { LookbookItem } from "@/lib/lookbook";
 import { confirmManualOrder } from "@/lib/orders.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -38,6 +41,7 @@ type Draft = {
   description: string;
   image_url: string;
   tag: string;
+  active: boolean;
   in_stock: boolean;
   stock: number;
   sort_order: number;
@@ -51,6 +55,7 @@ const emptyDraft = (): Draft => ({
   description: "",
   image_url: "",
   tag: "",
+  active: true,
   in_stock: true,
   stock: 0,
   sort_order: 0,
@@ -58,7 +63,7 @@ const emptyDraft = (): Draft => ({
 
 function AdminPage() {
   const { isAdmin, loading, signOut, user } = useAuth();
-  const [tab, setTab] = useState<"products" | "orders" | "reviews">("products");
+  const [tab, setTab] = useState<"products" | "lookbook" | "orders" | "reviews">("products");
 
   if (loading) {
     return (
@@ -102,7 +107,7 @@ function AdminPage() {
       </div>
 
       <div className="mt-8 flex gap-2 border-b border-border">
-        {(["products", "orders", "reviews"] as const).map((t) => (
+        {(["products", "lookbook", "orders", "reviews"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -119,6 +124,7 @@ function AdminPage() {
       </div>
 
       {tab === "products" && <ProductsAdmin />}
+      {tab === "lookbook" && <LookbookAdmin />}
       {tab === "orders" && <OrdersAdmin />}
       {tab === "reviews" && <ReviewsAdmin />}
     </section>
@@ -154,6 +160,7 @@ function ProductsAdmin() {
         description: d.description,
         image_url: d.image_url,
         tag: d.tag || null,
+        active: d.active,
         in_stock: d.in_stock,
         stock: Math.max(0, Math.round(d.stock || 0)),
         sort_order: d.sort_order,
@@ -175,17 +182,17 @@ function ProductsAdmin() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save."),
   });
 
-  const remove = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("products").delete().eq("id", id);
+  const archive = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const { error } = await supabase.from("products").update({ active }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: ["admin-products"] });
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success("Product deleted.");
+      toast.success(variables.active ? "Product restored." : "Product archived.");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not delete."),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not update product."),
   });
 
   const handleUpload = async (file: File) => {
@@ -238,7 +245,7 @@ function ProductsAdmin() {
               </div>
               <div className="p-4">
                 <p className="text-[0.65rem] uppercase tracking-[0.2em] text-muted-foreground">
-                  {p.category} {!p.in_stock && "· Sold out"}
+                  {p.category} {!p.active ? "· Archived" : !p.in_stock && "· Sold out"}
                 </p>
                 <h3 className="mt-1 font-display text-lg">{p.name}</h3>
                 <p className="text-sm text-muted-foreground">
@@ -247,7 +254,12 @@ function ProductsAdmin() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     onClick={() =>
-                      setDraft({ ...p, tag: p.tag ?? "", description: p.description ?? "" })
+                      setDraft({
+                        ...p,
+                        active: p.active ?? true,
+                        tag: p.tag ?? "",
+                        description: p.description ?? "",
+                      })
                     }
                     className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
                   >
@@ -260,12 +272,11 @@ function ProductsAdmin() {
                     <Layers size={13} /> Variants
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm(`Delete "${p.name}"?`)) remove.mutate(p.id);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-destructive"
+                    onClick={() => archive.mutate({ id: p.id, active: !p.active })}
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
                   >
-                    <Trash2 size={13} /> Delete
+                    {p.active ? <Archive size={13} /> : <RotateCcw size={13} />}
+                    {p.active ? "Archive" : "Restore"}
                   </button>
                 </div>
               </div>
@@ -385,10 +396,19 @@ function ProductsAdmin() {
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  checked={draft.active}
+                  onChange={(e) => setDraft({ ...draft, active: e.target.checked })}
+                />
+                Active on storefront
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
                   checked={draft.in_stock}
                   onChange={(e) => setDraft({ ...draft, in_stock: e.target.checked })}
                 />
-                Listed in shop (untick to hide as sold out)
+                Available for purchase
               </label>
             </div>
 
@@ -413,6 +433,256 @@ function ProductsAdmin() {
 
       {variantsFor && (
         <VariantsEditor product={variantsFor} onClose={() => setVariantsFor(null)} />
+      )}
+    </div>
+  );
+}
+
+type LookbookDraft = {
+  id?: string;
+  title: string;
+  caption: string;
+  image_url: string;
+  active: boolean;
+  sort_order: number;
+};
+
+const emptyLookbookDraft = (): LookbookDraft => ({
+  title: "",
+  caption: "",
+  image_url: "",
+  active: true,
+  sort_order: 0,
+});
+
+function LookbookAdmin() {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState<LookbookDraft | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ["admin-lookbook-items"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("lookbook_items")
+        .select("*")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as LookbookItem[];
+    },
+  });
+
+  const save = useMutation({
+    mutationFn: async (d: LookbookDraft) => {
+      const payload = {
+        title: d.title.trim(),
+        caption: d.caption.trim(),
+        image_url: d.image_url,
+        active: d.active,
+        sort_order: Math.round(d.sort_order || 0),
+      };
+      if (!payload.image_url) throw new Error("Upload an image before saving.");
+      if (d.id) {
+        const { error } = await supabase.from("lookbook_items").update(payload).eq("id", d.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("lookbook_items").insert(payload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-lookbook-items"] });
+      qc.invalidateQueries({ queryKey: ["lookbook-items"] });
+      setDraft(null);
+      toast.success("Lookbook image saved.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save image."),
+  });
+
+  const archive = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const { error } = await supabase.from("lookbook_items").update({ active }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ["admin-lookbook-items"] });
+      qc.invalidateQueries({ queryKey: ["lookbook-items"] });
+      toast.success(variables.active ? "Lookbook image restored." : "Lookbook image hidden.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not update image."),
+  });
+
+  const handleUpload = async (file: File) => {
+    if (!draft) return;
+    setUploading(true);
+    try {
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Please upload an image file.");
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("Image must be 5MB or smaller.");
+      }
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `lookbook/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage
+        .from("lookbook-images")
+        .upload(path, file, { cacheControl: "31536000", upsert: false });
+      if (error) throw error;
+      const { data } = supabase.storage.from("lookbook-images").getPublicUrl(path);
+      setDraft({ ...draft, image_url: data.publicUrl });
+      toast.success("Image uploaded.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setDraft(emptyLookbookDraft())}
+          className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground"
+        >
+          <Plus size={14} /> Add lookbook image
+        </button>
+      </div>
+
+      {isLoading ? (
+        <p className="mt-8 text-sm text-muted-foreground">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="mt-8 text-sm text-muted-foreground">No lookbook images yet.</p>
+      ) : (
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item) => (
+            <div key={item.id} className="overflow-hidden rounded-sm border border-border">
+              <div className="aspect-[4/3] bg-secondary">
+                <img src={item.image_url} alt={item.title} className="h-full w-full object-cover" />
+              </div>
+              <div className="p-4">
+                <p className="text-[0.65rem] uppercase tracking-[0.2em] text-muted-foreground">
+                  Order {item.sort_order} {!item.active && "· Hidden"}
+                </p>
+                <h3 className="mt-1 font-display text-lg">{item.title || "Untitled image"}</h3>
+                {item.caption && <p className="mt-1 text-sm text-muted-foreground">{item.caption}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={() =>
+                      setDraft({
+                        id: item.id,
+                        title: item.title,
+                        caption: item.caption,
+                        image_url: item.image_url,
+                        active: item.active,
+                        sort_order: item.sort_order,
+                      })
+                    }
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
+                  >
+                    <Pencil size={13} /> Edit
+                  </button>
+                  <button
+                    onClick={() => archive.mutate({ id: item.id, active: !item.active })}
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
+                  >
+                    {item.active ? <Archive size={13} /> : <RotateCcw size={13} />}
+                    {item.active ? "Hide" : "Restore"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {draft && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-foreground/40 p-4">
+          <div className="my-8 w-full max-w-lg rounded-sm border border-border bg-background p-6">
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-2xl">
+                {draft.id ? "Edit lookbook image" : "New lookbook image"}
+              </h2>
+              <button onClick={() => setDraft(null)} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <Field label="Title">
+                <input
+                  className={inputCls}
+                  value={draft.title}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                />
+              </Field>
+              <Field label="Caption">
+                <textarea
+                  rows={3}
+                  className={inputCls}
+                  value={draft.caption}
+                  onChange={(e) => setDraft({ ...draft, caption: e.target.value })}
+                />
+              </Field>
+              <Field label="Display order">
+                <input
+                  type="number"
+                  className={inputCls}
+                  value={draft.sort_order}
+                  onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Lookbook image">
+                <div className="flex items-center gap-4">
+                  <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm border border-border bg-secondary">
+                    {draft.image_url && (
+                      <img src={draft.image_url} alt="" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.2em]">
+                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploading ? "Uploading…" : "Upload image"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploading}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleUpload(f);
+                      }}
+                    />
+                  </label>
+                </div>
+              </Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={draft.active}
+                  onChange={(e) => setDraft({ ...draft, active: e.target.checked })}
+                />
+                Active on lookbook
+              </label>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setDraft(null)}
+                className="rounded-full border border-border px-5 py-2.5 text-xs uppercase tracking-[0.2em]"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={save.isPending || !draft.image_url}
+                onClick={() => save.mutate(draft)}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground disabled:opacity-60"
+              >
+                {save.isPending && <Loader2 size={14} className="animate-spin" />} Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

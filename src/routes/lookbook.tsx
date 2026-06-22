@@ -1,11 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import hero from "@/assets/hero-1.jpg";
-import look from "@/assets/lookbook-1.jpg";
-import p1 from "@/assets/product-1.jpg";
-import p2 from "@/assets/product-2.jpg";
-import p3 from "@/assets/product-3.jpg";
-import p4 from "@/assets/product-4.jpg";
-import collection from "@/assets/collection-1.jpg";
+import { useLookbookItems } from "@/lib/lookbook";
 
 export const Route = createFileRoute("/lookbook")({
   head: () => ({
@@ -25,6 +20,8 @@ export const Route = createFileRoute("/lookbook")({
 });
 
 function Lookbook() {
+  const { data: items = [], isLoading } = useLookbookItems();
+
   return (
     <>
       <section className="container-boutique py-16 md:py-24">
@@ -38,27 +35,60 @@ function Lookbook() {
       </section>
 
       <section className="container-boutique grid gap-6 pb-24 md:grid-cols-12">
-        <figure className="hover-zoom md:col-span-7 aspect-[4/5] overflow-hidden">
-          <img src={hero} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-5 aspect-[4/5] overflow-hidden md:mt-24">
-          <img src={look} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-4 aspect-[4/5] overflow-hidden">
-          <img src={p1} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-4 aspect-[4/5] overflow-hidden md:mt-16">
-          <img src={p2} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-4 aspect-[4/5] overflow-hidden">
-          <img src={p3} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-6 aspect-[5/4] overflow-hidden">
-          <img src={collection} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
-        <figure className="hover-zoom md:col-span-6 aspect-[5/4] overflow-hidden md:mt-12">
-          <img src={p4} alt="" loading="lazy" className="h-full w-full object-cover" />
-        </figure>
+        {isLoading &&
+          Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className={
+                "animate-pulse bg-secondary " +
+                (i < 2 ? "aspect-[4/5] md:col-span-6" : "aspect-[5/4] md:col-span-4")
+              }
+            />
+          ))}
+
+        {!isLoading &&
+          items.map((item, i) => (
+            <figure
+              key={item.id}
+              className={
+                (i % 5 === 0
+                  ? "md:col-span-7"
+                  : i % 5 === 1
+                    ? "md:col-span-5 md:mt-24"
+                    : i % 5 === 2
+                      ? "md:col-span-4"
+                      : i % 5 === 3
+                        ? "md:col-span-4 md:mt-16"
+                        : "md:col-span-6")
+              }
+            >
+              <div
+                className={
+                  "hover-zoom overflow-hidden " + (i % 5 === 4 ? "aspect-[5/4]" : "aspect-[4/5]")
+                }
+              >
+                <img
+                  src={item.image_url}
+                  alt={item.title || item.caption || "Superb Creations lookbook image"}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              {(item.title || item.caption) && (
+                <figcaption className="mt-3 text-sm text-muted-foreground">
+                  {item.title && <span className="font-medium text-foreground">{item.title}</span>}
+                  {item.title && item.caption && " · "}
+                  {item.caption}
+                </figcaption>
+              )}
+            </figure>
+          ))}
+
+        {!isLoading && items.length === 0 && (
+          <p className="md:col-span-12 text-center text-sm text-muted-foreground">
+            No lookbook images available yet.
+          </p>
+        )}
       </section>
     </>
   );

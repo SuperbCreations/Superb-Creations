@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
-import { Instagram, Youtube, MessageCircle, Mail, MapPin } from "lucide-react";
+import { Facebook, Instagram, Youtube, MessageCircle, Mail, MapPin } from "lucide-react";
 import { whatsappLink } from "@/lib/products";
 
 const schema = z.object({
@@ -67,8 +67,8 @@ function Contact() {
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <Mail size={16} />
             </span>
-            <a href="mailto:hello@superbcreations.in" className="hover:underline">
-              hello@superbcreations.in
+            <a href="mailto:superbconnections55@gmail.com" className="hover:underline">
+              superbconnections55@gmail.com
             </a>
           </li>
           <li className="flex items-center gap-4">
@@ -97,6 +97,15 @@ function Contact() {
             className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
           >
             <Youtube size={16} />
+          </a>
+          <a
+            href="https://www.facebook.com/share/1U22A7sHpi/?mibextid=wwXIfr"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Facebook"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
+          >
+            <Facebook size={16} />
           </a>
         </div>
       </div>

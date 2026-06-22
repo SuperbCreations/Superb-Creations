@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import about from "@/assets/lookbook-1.jpg";
+import { useLookbookItems } from "@/lib/lookbook";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
@@ -18,6 +18,9 @@ export const Route = createFileRoute("/about")({
 });
 
 function About() {
+  const { data: lookbookItems = [] } = useLookbookItems();
+  const aboutImage = lookbookItems[0];
+
   return (
     <>
       <section className="container-boutique grid gap-12 py-20 md:grid-cols-2 md:py-28">
@@ -52,7 +55,16 @@ function About() {
           </Link>
         </div>
         <div className="hover-zoom aspect-[4/5] overflow-hidden">
-          <img src={about} alt="Founder portrait" loading="lazy" className="h-full w-full object-cover" />
+          {aboutImage ? (
+            <img
+              src={aboutImage.image_url}
+              alt={aboutImage.title || "Superb Creations story"}
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="h-full w-full bg-secondary" />
+          )}
         </div>
       </section>
 

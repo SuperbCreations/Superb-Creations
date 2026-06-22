@@ -29,6 +29,7 @@ type ProductRow = {
   name: string;
   price: number;
   image_url: string;
+  active: boolean;
   in_stock: boolean;
   stock: number;
 };
@@ -95,7 +96,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
 
     const { data: products, error: productsError } = await supabaseAdmin
       .from("products")
-      .select("id,slug,name,price,image_url,in_stock,stock")
+      .select("id,slug,name,price,image_url,active,in_stock,stock")
       .in("id", productIds);
     if (productsError) throw productsError;
 
@@ -115,7 +116,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
 
     const orderItems = cartItems.map((item) => {
       const product = productsById.get(item.product_id);
-      if (!product || !product.in_stock) {
+      if (!product || !product.active || !product.in_stock) {
         throw new Error("One or more items are no longer available.");
       }
 
@@ -198,13 +199,9 @@ export const confirmManualOrder = createServerFn({ method: "POST" })
     const { requireOwnerAdmin } = await import("@/lib/admin.server");
     await requireOwnerAdmin(data.accessToken);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Secure, idempotent RPC: verifies state, marks paid+confirmed,
-    // and decrements stock exactly once. Do NOT replace with a direct UPDATE.
-    const rpc = supabaseAdmin.rpc as unknown as (
-      fn: string,
-      args: Record<string, unknown>,
-    ) => Promise<{ data: unknown; error: { message: string } | null }>;
-    const { error } = await rpc("confirm_manual_order", { p_order_id: data.orderId });
-    if (error) throw new Error(error.message);
-    return { ok: true as const, orderId: data.orderId };
+    const { data: result, error } = await supabaseAdmin.rpc("confirm_manual_order", {
+      p_order_id: data.orderId,
+    });
+    if (error) throw error;
+    return result;
   });

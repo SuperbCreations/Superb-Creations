@@ -19,7 +19,7 @@ export const Route = createFileRoute("/support-policy")({
       sections={[
         {
           title: "Support channels",
-          body: "Primary support is available on WhatsApp at +91 70062 02496 and by email at hello@superbcreations.in. Placeholder: confirm final support email before launch.",
+          body: "Primary support is available on WhatsApp at +91 70062 02496 and by email at superbconnections55@gmail.com. Placeholder: confirm final support email before launch.",
         },
         {
           title: "Response times",

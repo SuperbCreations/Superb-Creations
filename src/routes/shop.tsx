@@ -80,7 +80,7 @@ function Shop() {
         )}
         {!isLoading && filtered.length === 0 && (
           <p className="mt-10 text-center text-sm text-muted-foreground">
-            More pieces dropping in this category soon.
+            No products available yet.
           </p>
         )}
       </section>

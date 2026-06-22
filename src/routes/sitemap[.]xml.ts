@@ -34,7 +34,7 @@ export const Route = createFileRoute("/sitemap.xml")({
             process.env.SUPABASE_PUBLISHABLE_KEY!,
             { auth: { persistSession: false, autoRefreshToken: false } },
           );
-          const { data } = await supabase.from("products").select("slug").eq("in_stock", true);
+          const { data } = await supabase.from("products").select("slug").eq("active", true);
           for (const p of data ?? []) {
             entries.push({ path: `/product/${p.slug}`, changefreq: "weekly", priority: "0.8" });
           }
