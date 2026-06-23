@@ -53,6 +53,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
+    setUser(null);
+    setSession(null);
+    if (typeof window !== "undefined") {
+      // Hard redirect to a safe public page so protected routes unmount cleanly.
+      window.location.replace("/");
+    }
   };
 
   return (
