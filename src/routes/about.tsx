@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useLookbookItems } from "@/lib/lookbook";
+import placeholderAbout from "@/assets/lookbook-1.jpg";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
@@ -63,7 +64,12 @@ function About() {
               className="h-full w-full object-cover"
             />
           ) : (
-            <div className="h-full w-full bg-secondary" />
+            <img
+              src={placeholderAbout}
+              alt="Superb Creations boutique placeholder"
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
           )}
         </div>
       </section>

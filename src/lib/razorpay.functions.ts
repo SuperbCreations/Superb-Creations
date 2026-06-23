@@ -13,6 +13,13 @@ const verifySchema = z.object({
   razorpay_signature: z.string(),
 });
 
+const failureSchema = z.object({
+  orderId: z.string().uuid(),
+  razorpay_order_id: z.string().optional(),
+  razorpay_payment_id: z.string().optional(),
+  reason: z.string().trim().max(1000).optional(),
+});
+
 export const createRazorpayOrder = createServerFn({ method: "POST" })
   .inputValidator((data) => createSchema.parse(data))
   .handler(async ({ data }) => {
@@ -95,6 +102,20 @@ export const verifyRazorpayPayment = createServerFn({ method: "POST" })
     const b = Buffer.from(data.razorpay_signature);
     const valid = a.length === b.length && timingSafeEqual(a, b);
     if (!valid) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      await supabaseAdmin.rpc("log_payment_ledger", {
+        p_order_id: data.orderId,
+        p_method: "razorpay",
+        p_provider: "razorpay",
+        p_amount: 0,
+        p_fee: 0,
+        p_status: "signature_failed",
+        p_reference_id: null,
+        p_provider_order_id: data.razorpay_order_id,
+        p_provider_payment_id: data.razorpay_payment_id,
+        p_failure_reason: "Invalid Razorpay signature",
+        p_raw_metadata: {},
+      });
       return { ok: false as const };
     }
 
@@ -110,4 +131,52 @@ export const verifyRazorpayPayment = createServerFn({ method: "POST" })
     if (error) throw error;
 
     return { ok: true as const, result };
+  });
+
+export const markRazorpayPaymentFailed = createServerFn({ method: "POST" })
+  .inputValidator((data) => failureSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from("orders")
+      .select("id,total,payment_fee,payment_status")
+      .eq("id", data.orderId)
+      .eq("payment_method", "razorpay")
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!order) throw new Error("Razorpay order not found.");
+    if (order.payment_status === "paid") return { ok: true, alreadyPaid: true };
+
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        payment_status: "failed",
+        status: "payment_failed",
+        operational_status: "payment_failed",
+        payment_failure_reason: data.reason || "Razorpay payment failed",
+        razorpay_order_id: data.razorpay_order_id || null,
+        razorpay_payment_id: data.razorpay_payment_id || null,
+      })
+      .eq("id", data.orderId);
+    await supabaseAdmin.rpc("append_order_event", {
+      p_order_id: data.orderId,
+      p_event_type: "payment_failed",
+      p_label: "Payment Failed",
+      p_details: { reason: data.reason || null },
+      p_visible_to_customer: true,
+    });
+    await supabaseAdmin.rpc("log_payment_ledger", {
+      p_order_id: data.orderId,
+      p_method: "razorpay",
+      p_provider: "razorpay",
+      p_amount: order.total,
+      p_fee: order.payment_fee || 0,
+      p_status: "failed",
+      p_reference_id: null,
+      p_provider_order_id: data.razorpay_order_id || null,
+      p_provider_payment_id: data.razorpay_payment_id || null,
+      p_failure_reason: data.reason || "Razorpay payment failed",
+      p_raw_metadata: {},
+    });
+    return { ok: true };
   });

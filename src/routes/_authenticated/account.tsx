@@ -1,12 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { Bell, FileText, Gift, Heart, LogOut, MapPin, Package, Shield, Star, Ticket, Truck, User } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { inr } from "@/lib/products";
 import { useBusinessSettings } from "@/lib/business-settings";
+import { requestRefund } from "@/lib/orders.functions";
+import { usePaymentMethods } from "@/lib/payments";
 import {
   useCustomerAddresses,
   useEmailPreferences,
@@ -22,6 +25,7 @@ import {
   type CustomerAddress,
 } from "@/lib/customer-engagement";
 import { useCart } from "@/lib/cart";
+import { useReferralCode } from "@/lib/growth";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({ meta: [{ title: "Your account — Superb Creations" }] }),
@@ -29,7 +33,8 @@ export const Route = createFileRoute("/_authenticated/account")({
 });
 
 function AccountPage() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, session } = useAuth();
+  const qc = useQueryClient();
   const { settings } = useBusinessSettings();
   const { addItem, setOpen: setCartOpen } = useCart();
   const [tab, setTab] = useState("profile");
@@ -40,12 +45,16 @@ function AccountPage() {
   const deleteAddress = useDeleteAddress(user?.id);
   const { data: wishlist = [] } = useWishlist(user?.id);
   const { data: loyalty } = useLoyalty(user?.id);
+  const { data: referralCode } = useReferralCode(user?.id);
   const { data: notifications = [] } = useNotifications(user?.id);
   const { data: emailPreferences } = useEmailPreferences(user?.id);
   const saveEmailPreferences = useSaveEmailPreferences(user?.id);
   const newsletter = useNewsletterSubscribe();
+  const requestRefundFn = useServerFn(requestRefund);
+  const { data: paymentMethods = [] } = usePaymentMethods();
   const [profileDraft, setProfileDraft] = useState<Record<string, string>>({});
   const [addressDraft, setAddressDraft] = useState<Partial<CustomerAddress> | null>(null);
+  const paymentMethodsByKey = new Map(paymentMethods.map((method) => [method.method_key, method]));
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
@@ -74,6 +83,29 @@ function AccountPage() {
     if (order.payment_status === "rejected") return "Rejected";
     if (order.payment_status === "expired") return "Expired";
     return order.payment_status || order.status;
+  };
+
+  const refundable = (order: any) =>
+    ["paid", "approved", "manual_confirmed"].includes(order.payment_status) &&
+    !["refund_requested", "refund_approved", "refund_completed"].includes(order.refund_status);
+
+  const startRefund = async (order: any) => {
+    const reason = prompt("Reason for refund request?");
+    if (!reason?.trim()) return;
+    try {
+      await requestRefundFn({
+        data: {
+          orderId: order.id,
+          amount: Number(order.total || 0),
+          reason: reason.trim(),
+          accessToken: session?.access_token,
+        },
+      });
+      qc.invalidateQueries({ queryKey: ["my-orders", user?.id] });
+      toast.success("Refund request submitted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not request refund.");
+    }
   };
 
   return (
@@ -321,6 +353,9 @@ function AccountPage() {
       ) : (
         <div className="mt-6 space-y-4">
           {orders.map((o: any) => (
+            (() => {
+              const paymentMethod = paymentMethodsByKey.get(o.payment_method);
+              return (
             <div key={o.id} className="rounded-sm border border-border p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -368,6 +403,14 @@ function AccountPage() {
                 </div>
               )}
               <div className="mt-3 rounded-sm bg-secondary/30 p-3 text-xs text-muted-foreground">
+                <p>Payment method: {paymentMethod?.display_name || statusLabel(o.payment_method)}</p>
+                <p>Payment status: {paymentLabel(o)}</p>
+                {paymentMethod?.instructions && ["awaiting_payment", "under_review", "cod_pending"].includes(o.payment_status) && (
+                  <p>Instructions: {paymentMethod.instructions}</p>
+                )}
+                {(o.payment_reference || o.payment_utr) && (
+                  <p>Submitted reference: {o.payment_reference || o.payment_utr}</p>
+                )}
                 <p>Created: {new Date(o.created_at).toLocaleString("en-IN")}</p>
                 {o.payment_submitted_at && (
                   <p>Payment submitted: {new Date(o.payment_submitted_at).toLocaleString("en-IN")}</p>
@@ -381,6 +424,17 @@ function AccountPage() {
                 {o.payment_rejection_reason && (
                   <p className="text-destructive">Rejection reason: {o.payment_rejection_reason}</p>
                 )}
+                {o.payment_failure_reason && (
+                  <p className="text-destructive">Payment failure: {o.payment_failure_reason}</p>
+                )}
+                {o.refund_status && (
+                  <p>
+                    Refund: {statusLabel(o.refund_status)}
+                    {o.refund_amount ? ` · ${inr(Number(o.refund_amount))}` : ""}
+                    {o.refund_reference ? ` · ${o.refund_reference}` : ""}
+                  </p>
+                )}
+                {o.refund_reason && <p>Refund reason: {o.refund_reason}</p>}
               </div>
               {(() => {
                 const timeline = [
@@ -436,7 +490,18 @@ function AccountPage() {
               >
                 <FileText size={13} /> Invoice
               </button>
+              {refundable(o) && (
+                <button
+                  type="button"
+                  onClick={() => startRefund(o)}
+                  className="ml-2 mt-4 inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]"
+                >
+                  Request refund
+                </button>
+              )}
             </div>
+              );
+            })()
           ))}
         </div>
       ))}
@@ -445,10 +510,32 @@ function AccountPage() {
       {tab === "coupons" && <CustomerCoupons />}
       {tab === "gift_cards" && <CustomerGiftCards />}
       {tab === "loyalty" && (
-        <section className="mt-6 rounded-sm border border-border p-5">
-          <p className="eyebrow">Loyalty points</p>
-          <h2 className="mt-2 font-display text-4xl">{loyalty?.points ?? 0}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Lifetime points: {loyalty?.lifetime_points ?? 0}</p>
+        <section className="mt-6 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
+          <div className="rounded-sm border border-border p-5">
+            <p className="eyebrow">Loyalty points</p>
+            <h2 className="mt-2 font-display text-4xl">{loyalty?.points ?? 0}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Lifetime points: {loyalty?.lifetime_points ?? 0}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Redeemed: {loyalty?.redeemed_points ?? 0}</p>
+          </div>
+          <div className="rounded-sm border border-border p-5">
+            <p className="eyebrow">Invite friends</p>
+            <h3 className="mt-2 font-display text-2xl">{referralCode || "Generating..."}</h3>
+            {referralCode && (
+              <p className="mt-2 break-all text-sm text-muted-foreground">
+                {typeof window !== "undefined" ? `${window.location.origin}/auth?ref=${referralCode}` : referralCode}
+              </p>
+            )}
+            <div className="mt-5 space-y-3">
+              {(loyalty?.loyalty_point_events ?? []).slice(0, 6).map((event: any) => (
+                <div key={event.id} className="flex justify-between gap-4 border-t border-border pt-3 text-sm">
+                  <span>{event.reason}</span>
+                  <span className={event.points >= 0 ? "text-foreground" : "text-muted-foreground"}>
+                    {event.points > 0 ? "+" : ""}{event.points}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
       )}
       {tab === "notifications" && (

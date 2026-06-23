@@ -22,14 +22,19 @@ import { Route as LookbookRouteImport } from './routes/lookbook'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as CartRouteImport } from './routes/cart'
+import { Route as BlogRouteImport } from './routes/blog'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProductSlugRouteImport } from './routes/product.$slug'
+import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
+import { Route as ApiPublicWebhooksShippingRouteImport } from './routes/api/public/webhooks/shipping'
 import { Route as ApiPublicWebhooksRazorpayRouteImport } from './routes/api/public/webhooks/razorpay'
+import { Route as ApiPublicWebhooksBrevoRouteImport } from './routes/api/public/webhooks/brevo'
+import { Route as ApiAdminCronRunRouteImport } from './routes/api/admin/cron/run'
 
 const TermsAndConditionsRoute = TermsAndConditionsRouteImport.update({
   id: '/terms-and-conditions',
@@ -96,6 +101,11 @@ const CartRoute = CartRouteImport.update({
   path: '/cart',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogRoute = BlogRouteImport.update({
+  id: '/blog',
+  path: '/blog',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -120,6 +130,11 @@ const ProductSlugRoute = ProductSlugRouteImport.update({
   path: '/product/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogSlugRoute = BlogSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => BlogRoute,
+} as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -130,17 +145,34 @@ const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicWebhooksShippingRoute =
+  ApiPublicWebhooksShippingRouteImport.update({
+    id: '/api/public/webhooks/shipping',
+    path: '/api/public/webhooks/shipping',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicWebhooksRazorpayRoute =
   ApiPublicWebhooksRazorpayRouteImport.update({
     id: '/api/public/webhooks/razorpay',
     path: '/api/public/webhooks/razorpay',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicWebhooksBrevoRoute = ApiPublicWebhooksBrevoRouteImport.update({
+  id: '/api/public/webhooks/brevo',
+  path: '/api/public/webhooks/brevo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminCronRunRoute = ApiAdminCronRunRouteImport.update({
+  id: '/api/admin/cron/run',
+  path: '/api/admin/cron/run',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/blog': typeof BlogRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
@@ -156,13 +188,18 @@ export interface FileRoutesByFullPath {
   '/terms-and-conditions': typeof TermsAndConditionsRoute
   '/account': typeof AuthenticatedAccountRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/product/$slug': typeof ProductSlugRoute
+  '/api/admin/cron/run': typeof ApiAdminCronRunRoute
+  '/api/public/webhooks/brevo': typeof ApiPublicWebhooksBrevoRoute
   '/api/public/webhooks/razorpay': typeof ApiPublicWebhooksRazorpayRoute
+  '/api/public/webhooks/shipping': typeof ApiPublicWebhooksShippingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/blog': typeof BlogRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
@@ -178,8 +215,12 @@ export interface FileRoutesByTo {
   '/terms-and-conditions': typeof TermsAndConditionsRoute
   '/account': typeof AuthenticatedAccountRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/product/$slug': typeof ProductSlugRoute
+  '/api/admin/cron/run': typeof ApiAdminCronRunRoute
+  '/api/public/webhooks/brevo': typeof ApiPublicWebhooksBrevoRoute
   '/api/public/webhooks/razorpay': typeof ApiPublicWebhooksRazorpayRoute
+  '/api/public/webhooks/shipping': typeof ApiPublicWebhooksShippingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -187,6 +228,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/blog': typeof BlogRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
@@ -202,8 +244,12 @@ export interface FileRoutesById {
   '/terms-and-conditions': typeof TermsAndConditionsRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/product/$slug': typeof ProductSlugRoute
+  '/api/admin/cron/run': typeof ApiAdminCronRunRoute
+  '/api/public/webhooks/brevo': typeof ApiPublicWebhooksBrevoRoute
   '/api/public/webhooks/razorpay': typeof ApiPublicWebhooksRazorpayRoute
+  '/api/public/webhooks/shipping': typeof ApiPublicWebhooksShippingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -211,6 +257,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/auth'
+    | '/blog'
     | '/cart'
     | '/checkout'
     | '/contact'
@@ -226,13 +273,18 @@ export interface FileRouteTypes {
     | '/terms-and-conditions'
     | '/account'
     | '/admin'
+    | '/blog/$slug'
     | '/product/$slug'
+    | '/api/admin/cron/run'
+    | '/api/public/webhooks/brevo'
     | '/api/public/webhooks/razorpay'
+    | '/api/public/webhooks/shipping'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
     | '/auth'
+    | '/blog'
     | '/cart'
     | '/checkout'
     | '/contact'
@@ -248,14 +300,19 @@ export interface FileRouteTypes {
     | '/terms-and-conditions'
     | '/account'
     | '/admin'
+    | '/blog/$slug'
     | '/product/$slug'
+    | '/api/admin/cron/run'
+    | '/api/public/webhooks/brevo'
     | '/api/public/webhooks/razorpay'
+    | '/api/public/webhooks/shipping'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/about'
     | '/auth'
+    | '/blog'
     | '/cart'
     | '/checkout'
     | '/contact'
@@ -271,8 +328,12 @@ export interface FileRouteTypes {
     | '/terms-and-conditions'
     | '/_authenticated/account'
     | '/_authenticated/admin'
+    | '/blog/$slug'
     | '/product/$slug'
+    | '/api/admin/cron/run'
+    | '/api/public/webhooks/brevo'
     | '/api/public/webhooks/razorpay'
+    | '/api/public/webhooks/shipping'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -280,6 +341,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
   AuthRoute: typeof AuthRoute
+  BlogRoute: typeof BlogRouteWithChildren
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
   ContactRoute: typeof ContactRoute
@@ -294,7 +356,10 @@ export interface RootRouteChildren {
   SupportPolicyRoute: typeof SupportPolicyRoute
   TermsAndConditionsRoute: typeof TermsAndConditionsRoute
   ProductSlugRoute: typeof ProductSlugRoute
+  ApiAdminCronRunRoute: typeof ApiAdminCronRunRoute
+  ApiPublicWebhooksBrevoRoute: typeof ApiPublicWebhooksBrevoRoute
   ApiPublicWebhooksRazorpayRoute: typeof ApiPublicWebhooksRazorpayRoute
+  ApiPublicWebhooksShippingRoute: typeof ApiPublicWebhooksShippingRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -390,6 +455,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CartRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog': {
+      id: '/blog'
+      path: '/blog'
+      fullPath: '/blog'
+      preLoaderRoute: typeof BlogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -425,6 +497,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof BlogRoute
+    }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
       path: '/admin'
@@ -439,11 +518,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAccountRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/webhooks/shipping': {
+      id: '/api/public/webhooks/shipping'
+      path: '/api/public/webhooks/shipping'
+      fullPath: '/api/public/webhooks/shipping'
+      preLoaderRoute: typeof ApiPublicWebhooksShippingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/webhooks/razorpay': {
       id: '/api/public/webhooks/razorpay'
       path: '/api/public/webhooks/razorpay'
       fullPath: '/api/public/webhooks/razorpay'
       preLoaderRoute: typeof ApiPublicWebhooksRazorpayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/webhooks/brevo': {
+      id: '/api/public/webhooks/brevo'
+      path: '/api/public/webhooks/brevo'
+      fullPath: '/api/public/webhooks/brevo'
+      preLoaderRoute: typeof ApiPublicWebhooksBrevoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/cron/run': {
+      id: '/api/admin/cron/run'
+      path: '/api/admin/cron/run'
+      fullPath: '/api/admin/cron/run'
+      preLoaderRoute: typeof ApiAdminCronRunRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -462,11 +562,22 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface BlogRouteChildren {
+  BlogSlugRoute: typeof BlogSlugRoute
+}
+
+const BlogRouteChildren: BlogRouteChildren = {
+  BlogSlugRoute: BlogSlugRoute,
+}
+
+const BlogRouteWithChildren = BlogRoute._addFileChildren(BlogRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AboutRoute: AboutRoute,
   AuthRoute: AuthRoute,
+  BlogRoute: BlogRouteWithChildren,
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
   ContactRoute: ContactRoute,
@@ -481,7 +592,10 @@ const rootRouteChildren: RootRouteChildren = {
   SupportPolicyRoute: SupportPolicyRoute,
   TermsAndConditionsRoute: TermsAndConditionsRoute,
   ProductSlugRoute: ProductSlugRoute,
+  ApiAdminCronRunRoute: ApiAdminCronRunRoute,
+  ApiPublicWebhooksBrevoRoute: ApiPublicWebhooksBrevoRoute,
   ApiPublicWebhooksRazorpayRoute: ApiPublicWebhooksRazorpayRoute,
+  ApiPublicWebhooksShippingRoute: ApiPublicWebhooksShippingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

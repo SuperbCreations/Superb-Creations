@@ -110,12 +110,12 @@ export const Route = createFileRoute("/api/public/webhooks/razorpay")({
         }
 
         // Locate the order: prefer notes/receipt, fall back to razorpay_order_id
-        let orderRow: { id: string; payment_status: string | null } | null =
+        let orderRow: { id: string; payment_status: string | null; total?: number | null; payment_fee?: number | null } | null =
           null;
         if (internalOrderId) {
           const { data } = await supabaseAdmin
             .from("orders")
-            .select("id,payment_status")
+            .select("id,payment_status,total,payment_fee")
             .eq("id", internalOrderId)
             .maybeSingle();
           orderRow = data ?? null;
@@ -123,7 +123,7 @@ export const Route = createFileRoute("/api/public/webhooks/razorpay")({
         if (!orderRow && razorpayOrderId) {
           const { data } = await supabaseAdmin
             .from("orders")
-            .select("id,payment_status")
+            .select("id,payment_status,total,payment_fee")
             .eq("razorpay_order_id", razorpayOrderId)
             .maybeSingle();
           orderRow = data ?? null;
@@ -151,9 +151,35 @@ export const Route = createFileRoute("/api/public/webhooks/razorpay")({
             .from("orders")
             .update({
               payment_status: "failed",
+              status: "payment_failed",
+              operational_status: "payment_failed",
               razorpay_payment_id: razorpayPaymentId ?? undefined,
+              payment_failure_reason: paymentEntity?.error_description ?? paymentEntity?.error_reason ?? "Razorpay payment failed",
             })
             .eq("id", orderRow.id);
+          await (supabaseAdmin as any).rpc("append_order_event", {
+            p_order_id: orderRow.id,
+            p_event_type: "payment_failed",
+            p_label: "Payment Failed",
+            p_details: {
+              reason: paymentEntity?.error_description ?? paymentEntity?.error_reason ?? null,
+              event_id: effectiveEventId,
+            },
+            p_visible_to_customer: true,
+          });
+          await (supabaseAdmin as any).rpc("log_payment_ledger", {
+            p_order_id: orderRow.id,
+            p_method: "razorpay",
+            p_provider: "razorpay",
+            p_amount: orderRow.total ?? 0,
+            p_fee: orderRow.payment_fee ?? 0,
+            p_status: "failed",
+            p_reference_id: null,
+            p_provider_order_id: razorpayOrderId,
+            p_provider_payment_id: razorpayPaymentId,
+            p_failure_reason: paymentEntity?.error_description ?? paymentEntity?.error_reason ?? "Razorpay payment failed",
+            p_raw_metadata: { event_id: effectiveEventId },
+          });
           console.log(
             "[razorpay-webhook] order marked failed",
             orderRow.id,

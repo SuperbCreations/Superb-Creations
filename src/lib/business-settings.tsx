@@ -34,6 +34,11 @@ export const DEFAULT_BUSINESS_SETTINGS = {
   enable_reviews: "true",
   enable_wishlist: "false",
   enable_newsletter: "false",
+  enable_loyalty: "true",
+  enable_referrals: "true",
+  enable_blog: "true",
+  enable_marketing_popups: "true",
+  enable_social_proof: "true",
   enable_email_sending: "false",
   brevo_contacts_enabled: "false",
   contact_email: "superbcreations55@gmail.com",
@@ -133,6 +138,14 @@ export const DEFAULT_BUSINESS_SETTINGS = {
   email_primary_color: "#b07a86",
   email_secondary_color: "#f7e8e8",
   max_upload_size_mb: "5",
+  loyalty_earn_rate: "1",
+  loyalty_redeem_rate: "1",
+  loyalty_min_redemption: "100",
+  loyalty_max_redemption_percent: "20",
+  loyalty_points_expiry_days: "365",
+  referral_reward_amount: "100",
+  referral_expiry_days: "90",
+  recent_purchase_window_hours: "72",
 } as const;
 
 export type BusinessSettings = Record<keyof typeof DEFAULT_BUSINESS_SETTINGS, string>;

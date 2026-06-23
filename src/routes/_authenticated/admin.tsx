@@ -46,10 +46,36 @@ import {
   createShipment,
   fetchTracking,
   rejectManualPayment,
+  resolveRefund,
   syncShipmentStatus,
   updateOrderOperations,
 } from "@/lib/orders.functions";
 import { checkBrevoConnection, sendBrevoTestEmail, sendNewsletterCampaign } from "@/lib/notifications.functions";
+import {
+  useBlogCategories,
+  useBlogPosts,
+  useGrowthAnalytics,
+  useAdminSeoSettings,
+  useSaveBlogPost,
+  useSaveMarketingPopup,
+  useSavePageSeo,
+  useRecommendationRules,
+  useSaveRecommendationRule,
+  useAdminMarketingPopups,
+  type BlogPost,
+  type MarketingPopup,
+  type PageSeo,
+  type RecommendationRule,
+} from "@/lib/growth";
+import {
+  useAdminPaymentMethods,
+  usePaymentAnalytics,
+  useRefundRequests,
+  useSavePaymentMethod,
+  type PaymentMethod,
+} from "@/lib/payments";
+import { markSystemErrorResolved, metadataPreview } from "@/lib/observability";
+import { runProductionTaskAsAdmin } from "@/lib/production-ops.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({ meta: [{ title: "Admin — Superb Creations" }] }),
@@ -112,7 +138,7 @@ function AdminPage() {
   const { isAdmin, loading, signOut, user } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] =
-    useState<"products" | "lookbook" | "orders" | "analytics" | "reviews" | "customers" | "coupons" | "settings">("products");
+    useState<"products" | "lookbook" | "orders" | "analytics" | "reviews" | "customers" | "coupons" | "growth" | "settings" | "system">("products");
 
   useEffect(() => {
     if (!loading && user && !isAdmin) {
@@ -163,7 +189,7 @@ function AdminPage() {
       </div>
 
       <div className="mt-8 flex gap-2 border-b border-border">
-        {(["products", "lookbook", "orders", "analytics", "reviews", "customers", "coupons", "settings"] as const).map((t) => (
+        {(["products", "lookbook", "orders", "analytics", "reviews", "customers", "coupons", "growth", "settings", "system"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -186,7 +212,619 @@ function AdminPage() {
       {tab === "reviews" && <ReviewsAdmin />}
       {tab === "customers" && <CustomersAdmin />}
       {tab === "coupons" && <CouponsAdmin />}
+      {tab === "growth" && <GrowthAdmin />}
       {tab === "settings" && <SettingsAdmin />}
+      {tab === "system" && <SystemAdmin />}
+    </section>
+  );
+}
+
+function GrowthAdmin() {
+  const qc = useQueryClient();
+  const { data: analytics = {}, isLoading: analyticsLoading } = useGrowthAnalytics();
+  const { data: categories = [] } = useBlogCategories(true);
+  const { data: posts = [] } = useBlogPosts({ includeDrafts: true });
+  const { data: popups = [] } = useAdminMarketingPopups();
+  const { data: seoSettings = [] } = useAdminSeoSettings();
+  const { data: recommendationRules = [] } = useRecommendationRules(true);
+  const savePost = useSaveBlogPost();
+  const savePopup = useSaveMarketingPopup();
+  const saveSeo = useSavePageSeo();
+  const saveRecommendationRule = useSaveRecommendationRule();
+  const { settings } = useBusinessSettings();
+  const [postDraft, setPostDraft] = useState<Partial<BlogPost> | null>(null);
+  const [popupDraft, setPopupDraft] = useState<Partial<MarketingPopup> | null>(null);
+  const [seoDraft, setSeoDraft] = useState<Partial<PageSeo> | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<Partial<RecommendationRule> | null>(null);
+  const [growthSettings, setGrowthSettings] = useState({
+    enable_loyalty: settings.enable_loyalty ?? "true",
+    loyalty_earn_rate: settings.loyalty_earn_rate ?? "1",
+    loyalty_redeem_rate: settings.loyalty_redeem_rate ?? "1",
+    loyalty_min_redemption: settings.loyalty_min_redemption ?? "100",
+    loyalty_max_redemption_percent: settings.loyalty_max_redemption_percent ?? "20",
+    loyalty_points_expiry_days: settings.loyalty_points_expiry_days ?? "365",
+    enable_referrals: settings.enable_referrals ?? "true",
+    referral_reward_amount: settings.referral_reward_amount ?? "100",
+    referral_expiry_days: settings.referral_expiry_days ?? "90",
+    enable_blog: settings.enable_blog ?? "true",
+    enable_marketing_popups: settings.enable_marketing_popups ?? "true",
+    enable_social_proof: settings.enable_social_proof ?? "true",
+  });
+
+  const saveGrowthSettings = useMutation({
+    mutationFn: async () => {
+      const rows = Object.entries(growthSettings).map(([key, value]) => ({ key, value }));
+      const { error } = await supabase.from("business_settings").upsert(rows, { onConflict: "key" });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["business-settings"] });
+      toast.success("Growth settings saved.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save growth settings."),
+  });
+
+  const metric = (group: string, key: string) => Number((analytics as any)?.[group]?.[key] ?? 0);
+
+  const newPost = () =>
+    setPostDraft({
+      title: "",
+      slug: "",
+      excerpt: "",
+      content: "",
+      banner_image_url: "",
+      category_id: categories[0]?.id ?? null,
+      tags: [],
+      status: "draft",
+      featured: false,
+      seo_title: "",
+      seo_description: "",
+      seo_keywords: "",
+      canonical_url: "",
+      og_image_url: "",
+      robots: "index,follow",
+    });
+
+  const newPopup = () =>
+    setPopupDraft({
+      name: "",
+      popup_type: "newsletter",
+      title: "",
+      body: "",
+      cta_label: "Shop now",
+      cta_url: "/shop",
+      coupon_code: "",
+      image_url: "",
+      active: false,
+      target_pages: ["*"],
+      frequency: "once_per_session",
+      sort_order: 0,
+    });
+
+  const newSeo = () =>
+    setSeoDraft({
+      page_key: "",
+      title: "",
+      description: "",
+      keywords: "",
+      canonical_url: "",
+      og_title: "",
+      og_description: "",
+      og_image_url: "",
+      twitter_image_url: "",
+      robots: "index,follow",
+      structured_data: {},
+    });
+
+  const newRule = () =>
+    setRuleDraft({
+      name: "",
+      rule_type: "trending",
+      active: true,
+      product_id: null,
+      related_product_ids: [],
+      sort_order: 0,
+      metadata: {},
+    });
+
+  return (
+    <section className="mt-8 space-y-8">
+      <div>
+        <p className="eyebrow">Growth</p>
+        <h2 className="mt-2 font-display text-3xl">Loyalty, referrals, blog and marketing</h2>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          ["Available Points", metric("loyalty", "availablePoints")],
+          ["Successful Referrals", metric("referrals", "successful")],
+          ["Published Posts", metric("blog", "published")],
+          ["Popup Clicks", metric("marketing", "clicks")],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-sm border border-border p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+            <p className="mt-2 font-display text-3xl">{analyticsLoading ? "..." : value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-sm border border-border p-5">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="font-display text-2xl">Growth settings</h3>
+          <button
+            type="button"
+            onClick={() => saveGrowthSettings.mutate()}
+            disabled={saveGrowthSettings.isPending}
+            className="rounded-full bg-primary px-5 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground disabled:opacity-60"
+          >
+            Save settings
+          </button>
+        </div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+          {Object.entries(growthSettings).map(([key, value]) => (
+            <Field key={key} label={key.replaceAll("_", " ")}>
+              {value === "true" || value === "false" ? (
+                <select
+                  className={inputCls}
+                  value={value}
+                  onChange={(e) => setGrowthSettings((current) => ({ ...current, [key]: e.target.value }))}
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              ) : (
+                <input
+                  className={inputCls}
+                  value={value}
+                  onChange={(e) => setGrowthSettings((current) => ({ ...current, [key]: e.target.value }))}
+                />
+              )}
+            </Field>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-sm border border-border p-5">
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="font-display text-2xl">Blog CMS</h3>
+            <button onClick={newPost} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]">
+              <Plus size={14} /> Article
+            </button>
+          </div>
+          <div className="mt-5 space-y-3">
+            {posts.map((post) => (
+              <div key={post.id} className="rounded-sm border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{post.title}</p>
+                    <p className="text-xs text-muted-foreground">{post.status} · {post.slug}</p>
+                  </div>
+                  <button onClick={() => setPostDraft(post)} className="rounded-full border border-border px-3 py-1 text-xs">Edit</button>
+                </div>
+              </div>
+            ))}
+            {posts.length === 0 && <p className="text-sm text-muted-foreground">No articles yet.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-sm border border-border p-5">
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="font-display text-2xl">Marketing popups</h3>
+            <button onClick={newPopup} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]">
+              <Plus size={14} /> Popup
+            </button>
+          </div>
+          <div className="mt-5 space-y-3">
+            {popups.map((popup) => (
+              <div key={popup.id} className="rounded-sm border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{popup.title}</p>
+                    <p className="text-xs text-muted-foreground">{popup.popup_type} · {popup.active ? "active" : "inactive"}</p>
+                  </div>
+                  <button onClick={() => setPopupDraft(popup)} className="rounded-full border border-border px-3 py-1 text-xs">Edit</button>
+                </div>
+              </div>
+            ))}
+            {popups.length === 0 && <p className="text-sm text-muted-foreground">No popups yet.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-sm border border-border p-5">
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="font-display text-2xl">SEO management</h3>
+            <button onClick={newSeo} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]">
+              <Plus size={14} /> SEO
+            </button>
+          </div>
+          <div className="mt-5 space-y-3">
+            {seoSettings.map((seo) => (
+              <div key={seo.page_key} className="rounded-sm border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{seo.page_key}</p>
+                    <p className="text-xs text-muted-foreground">{seo.title || "No title"}</p>
+                  </div>
+                  <button onClick={() => setSeoDraft(seo)} className="rounded-full border border-border px-3 py-1 text-xs">Edit</button>
+                </div>
+              </div>
+            ))}
+            {seoSettings.length === 0 && <p className="text-sm text-muted-foreground">No page SEO overrides yet.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-sm border border-border p-5">
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="font-display text-2xl">Recommendation rules</h3>
+            <button onClick={newRule} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]">
+              <Plus size={14} /> Rule
+            </button>
+          </div>
+          <div className="mt-5 space-y-3">
+            {recommendationRules.map((rule) => (
+              <div key={rule.id} className="rounded-sm border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{rule.name}</p>
+                    <p className="text-xs text-muted-foreground">{rule.rule_type} · {rule.active ? "active" : "inactive"}</p>
+                  </div>
+                  <button onClick={() => setRuleDraft(rule)} className="rounded-full border border-border px-3 py-1 text-xs">Edit</button>
+                </div>
+              </div>
+            ))}
+            {recommendationRules.length === 0 && <p className="text-sm text-muted-foreground">No custom recommendation rules yet.</p>}
+          </div>
+        </div>
+      </div>
+
+      {postDraft && (
+        <div className="rounded-sm border border-border p-5">
+          <h3 className="font-display text-2xl">{postDraft.id ? "Edit article" : "New article"}</h3>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Title"><input className={inputCls} value={postDraft.title ?? ""} onChange={(e) => setPostDraft({ ...postDraft, title: e.target.value, slug: postDraft.slug || slugify(e.target.value) })} /></Field>
+            <Field label="Slug"><input className={inputCls} value={postDraft.slug ?? ""} onChange={(e) => setPostDraft({ ...postDraft, slug: slugify(e.target.value) })} /></Field>
+            <Field label="Category">
+              <select className={inputCls} value={postDraft.category_id ?? ""} onChange={(e) => setPostDraft({ ...postDraft, category_id: e.target.value || null })}>
+                <option value="">None</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Status">
+              <select className={inputCls} value={postDraft.status ?? "draft"} onChange={(e) => setPostDraft({ ...postDraft, status: e.target.value as BlogPost["status"], published_at: e.target.value === "published" ? new Date().toISOString() : postDraft.published_at })}>
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+              </select>
+            </Field>
+            <Field label="Banner image URL"><input className={inputCls} value={postDraft.banner_image_url ?? ""} onChange={(e) => setPostDraft({ ...postDraft, banner_image_url: e.target.value })} /></Field>
+            <Field label="Tags"><input className={inputCls} value={(postDraft.tags ?? []).join(", ")} onChange={(e) => setPostDraft({ ...postDraft, tags: e.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) })} /></Field>
+            <Field label="Excerpt"><textarea rows={3} className={inputCls} value={postDraft.excerpt ?? ""} onChange={(e) => setPostDraft({ ...postDraft, excerpt: e.target.value })} /></Field>
+            <Field label="SEO description"><textarea rows={3} className={inputCls} value={postDraft.seo_description ?? ""} onChange={(e) => setPostDraft({ ...postDraft, seo_description: e.target.value })} /></Field>
+            <div className="sm:col-span-2">
+              <Field label="Content"><textarea rows={8} className={inputCls} value={postDraft.content ?? ""} onChange={(e) => setPostDraft({ ...postDraft, content: e.target.value })} /></Field>
+            </div>
+          </div>
+          <div className="mt-5 flex gap-2">
+            <button onClick={() => savePost.mutate(postDraft, { onSuccess: () => { setPostDraft(null); toast.success("Article saved."); } })} className="rounded-full bg-primary px-6 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground">Save article</button>
+            <button onClick={() => setPostDraft(null)} className="rounded-full border border-border px-6 py-2.5 text-xs uppercase tracking-[0.2em]">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {popupDraft && (
+        <div className="rounded-sm border border-border p-5">
+          <h3 className="font-display text-2xl">{popupDraft.id ? "Edit popup" : "New popup"}</h3>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Name"><input className={inputCls} value={popupDraft.name ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, name: e.target.value })} /></Field>
+            <Field label="Type">
+              <select className={inputCls} value={popupDraft.popup_type ?? "newsletter"} onChange={(e) => setPopupDraft({ ...popupDraft, popup_type: e.target.value })}>
+                {["newsletter", "discount", "exit_intent", "welcome", "festival", "manual"].map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </Field>
+            <Field label="Title"><input className={inputCls} value={popupDraft.title ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, title: e.target.value })} /></Field>
+            <Field label="CTA URL"><input className={inputCls} value={popupDraft.cta_url ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, cta_url: e.target.value })} /></Field>
+            <Field label="CTA label"><input className={inputCls} value={popupDraft.cta_label ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, cta_label: e.target.value })} /></Field>
+            <Field label="Coupon code"><input className={inputCls} value={popupDraft.coupon_code ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, coupon_code: e.target.value.toUpperCase() })} /></Field>
+            <Field label="Image URL"><input className={inputCls} value={popupDraft.image_url ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, image_url: e.target.value })} /></Field>
+            <Field label="Active">
+              <select className={inputCls} value={popupDraft.active ? "true" : "false"} onChange={(e) => setPopupDraft({ ...popupDraft, active: e.target.value === "true" })}>
+                <option value="false">Inactive</option>
+                <option value="true">Active</option>
+              </select>
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Body"><textarea rows={4} className={inputCls} value={popupDraft.body ?? ""} onChange={(e) => setPopupDraft({ ...popupDraft, body: e.target.value })} /></Field>
+            </div>
+          </div>
+          <div className="mt-5 flex gap-2">
+            <button onClick={() => savePopup.mutate(popupDraft, { onSuccess: () => { setPopupDraft(null); toast.success("Popup saved."); } })} className="rounded-full bg-primary px-6 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground">Save popup</button>
+            <button onClick={() => setPopupDraft(null)} className="rounded-full border border-border px-6 py-2.5 text-xs uppercase tracking-[0.2em]">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {seoDraft && (
+        <div className="rounded-sm border border-border p-5">
+          <h3 className="font-display text-2xl">{seoDraft.page_key ? "Edit SEO" : "New SEO override"}</h3>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Page key"><input className={inputCls} value={seoDraft.page_key ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, page_key: e.target.value })} /></Field>
+            <Field label="Robots"><input className={inputCls} value={seoDraft.robots ?? "index,follow"} onChange={(e) => setSeoDraft({ ...seoDraft, robots: e.target.value })} /></Field>
+            <Field label="Title"><input className={inputCls} value={seoDraft.title ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, title: e.target.value })} /></Field>
+            <Field label="Canonical URL"><input className={inputCls} value={seoDraft.canonical_url ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, canonical_url: e.target.value })} /></Field>
+            <Field label="Description"><textarea rows={3} className={inputCls} value={seoDraft.description ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, description: e.target.value })} /></Field>
+            <Field label="Open Graph description"><textarea rows={3} className={inputCls} value={seoDraft.og_description ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, og_description: e.target.value })} /></Field>
+            <Field label="Keywords"><input className={inputCls} value={seoDraft.keywords ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, keywords: e.target.value })} /></Field>
+            <Field label="OG image URL"><input className={inputCls} value={seoDraft.og_image_url ?? ""} onChange={(e) => setSeoDraft({ ...seoDraft, og_image_url: e.target.value })} /></Field>
+          </div>
+          <div className="mt-5 flex gap-2">
+            <button onClick={() => saveSeo.mutate(seoDraft, { onSuccess: () => { setSeoDraft(null); toast.success("SEO saved."); } })} className="rounded-full bg-primary px-6 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground">Save SEO</button>
+            <button onClick={() => setSeoDraft(null)} className="rounded-full border border-border px-6 py-2.5 text-xs uppercase tracking-[0.2em]">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {ruleDraft && (
+        <div className="rounded-sm border border-border p-5">
+          <h3 className="font-display text-2xl">{ruleDraft.id ? "Edit recommendation rule" : "New recommendation rule"}</h3>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Field label="Name"><input className={inputCls} value={ruleDraft.name ?? ""} onChange={(e) => setRuleDraft({ ...ruleDraft, name: e.target.value })} /></Field>
+            <Field label="Type">
+              <select className={inputCls} value={ruleDraft.rule_type ?? "trending"} onChange={(e) => setRuleDraft({ ...ruleDraft, rule_type: e.target.value })}>
+                {["trending", "popular", "best_sellers", "similar", "frequently_bought_together", "recommended_for_you"].map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </Field>
+            <Field label="Product ID"><input className={inputCls} value={ruleDraft.product_id ?? ""} onChange={(e) => setRuleDraft({ ...ruleDraft, product_id: e.target.value || null })} /></Field>
+            <Field label="Related product IDs"><input className={inputCls} value={(ruleDraft.related_product_ids ?? []).join(",")} onChange={(e) => setRuleDraft({ ...ruleDraft, related_product_ids: e.target.value.split(",").map((id) => id.trim()).filter(Boolean) })} /></Field>
+            <Field label="Sort order"><input type="number" className={inputCls} value={ruleDraft.sort_order ?? 0} onChange={(e) => setRuleDraft({ ...ruleDraft, sort_order: Number(e.target.value) })} /></Field>
+            <Field label="Active">
+              <select className={inputCls} value={ruleDraft.active ? "true" : "false"} onChange={(e) => setRuleDraft({ ...ruleDraft, active: e.target.value === "true" })}>
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-5 flex gap-2">
+            <button onClick={() => saveRecommendationRule.mutate(ruleDraft, { onSuccess: () => { setRuleDraft(null); toast.success("Rule saved."); } })} className="rounded-full bg-primary px-6 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground">Save rule</button>
+            <button onClick={() => setRuleDraft(null)} className="rounded-full border border-border px-6 py-2.5 text-xs uppercase tracking-[0.2em]">Cancel</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SystemAdmin() {
+  const qc = useQueryClient();
+  const { session } = useAuth();
+  const runTaskFn = useServerFn(runProductionTaskAsAdmin);
+  const [severity, setSeverity] = useState("all");
+  const [source, setSource] = useState("all");
+
+  const { data: errors = [] } = useQuery({
+    queryKey: ["system-error-logs", severity, source],
+    queryFn: async () => {
+      let query = (supabase as any)
+        .from("system_error_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(80);
+      if (severity !== "all") query = query.eq("severity", severity);
+      if (source !== "all") query = query.eq("source", source);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: auditLogs = [] } = useQuery({
+    queryKey: ["admin-audit-logs"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("admin_audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: cronLogs = [] } = useQuery({
+    queryKey: ["cron-run-logs"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("cron_run_logs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: queueStats = {} } = useQuery({
+    queryKey: ["email-queue-stats"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).from("email_queue").select("status");
+      if (error) throw error;
+      return (data ?? []).reduce((acc: Record<string, number>, row: any) => {
+        acc[row.status] = (acc[row.status] || 0) + 1;
+        return acc;
+      }, {});
+    },
+  });
+
+  const runTask = useMutation({
+    mutationFn: async (task: "expire_due_manual_payment_orders" | "process_email_queue" | "generate_daily_analytics_snapshot" | "sync_shipment_statuses" | "cleanup_old_events" | "check_system_health") => {
+      if (!session?.access_token) throw new Error("Please sign in again.");
+      return runTaskFn({ data: { accessToken: session.access_token, task } });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cron-run-logs"] });
+      qc.invalidateQueries({ queryKey: ["system-error-logs"] });
+      qc.invalidateQueries({ queryKey: ["email-queue-stats"] });
+      toast.success("Task completed.");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Task failed."),
+  });
+
+  const resolveError = useMutation({
+    mutationFn: markSystemErrorResolved,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["system-error-logs"] });
+      toast.success("Error marked resolved.");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not update error."),
+  });
+
+  const exportAudit = () =>
+    downloadCsv("admin-audit-logs.csv", [
+      ["created_at", "actor_email", "action", "entity_type", "entity_id", "summary"],
+      ...auditLogs.map((row: any) => [row.created_at, row.actor_email, row.action, row.entity_type, row.entity_id, row.summary]),
+    ]);
+
+  return (
+    <section className="mt-8 space-y-6">
+      <div>
+        <p className="eyebrow">Production</p>
+        <h2 className="mt-2 font-display text-3xl">System health and security</h2>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-4">
+        {[
+          ["Unresolved Errors", errors.filter((e: any) => !e.resolved).length],
+          ["Queued Emails", (queueStats as any).queued || 0],
+          ["Failed Emails", ((queueStats as any).failed || 0) + ((queueStats as any).permanently_failed || 0)],
+          ["Audit Events", auditLogs.length],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-sm border border-border p-4">
+            <p className="text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+            <p className="mt-1 font-display text-2xl">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-sm border border-border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow">Workers</p>
+            <h3 className="mt-1 font-display text-2xl">Run maintenance tasks</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              "expire_due_manual_payment_orders",
+              "process_email_queue",
+              "generate_daily_analytics_snapshot",
+              "sync_shipment_statuses",
+              "cleanup_old_events",
+              "check_system_health",
+            ].map((task) => (
+              <button
+                key={task}
+                type="button"
+                disabled={runTask.isPending}
+                onClick={() => runTask.mutate(task as any)}
+                className="rounded-full border border-border px-3 py-1.5 text-xs"
+              >
+                {task.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 space-y-2 text-xs">
+          {cronLogs.map((row: any) => (
+            <div key={row.id} className="rounded-sm bg-secondary/40 p-3">
+              <p className="font-medium">{row.task} · {statusLabel(row.status)}</p>
+              <p className="text-muted-foreground">{new Date(row.started_at).toLocaleString("en-IN")}</p>
+              {row.error && <p className="text-destructive">{row.error}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-sm border border-border p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="eyebrow">Errors</p>
+              <h3 className="mt-1 font-display text-2xl">Recent system errors</h3>
+            </div>
+            <div className="flex gap-2">
+              <select className={inputCls} value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                {["all", "critical", "error", "warning", "info"].map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <select className={inputCls} value={source} onChange={(e) => setSource(e.target.value)}>
+                {["all", "client", "server", "checkout", "webhook", "cron", "analytics", "newsletter"].map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-4 space-y-3">
+            {errors.map((row: any) => (
+              <div key={row.id} className="rounded-sm border border-border p-3 text-xs">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{statusLabel(row.severity)} · {row.source}</p>
+                    <p className="mt-1 text-muted-foreground">{row.message}</p>
+                    <p className="mt-1 text-muted-foreground">{new Date(row.created_at).toLocaleString("en-IN")} · {row.request_path || "no path"}</p>
+                  </div>
+                  {!row.resolved && (
+                    <button onClick={() => resolveError.mutate(row.id)} className="rounded-full border border-border px-2 py-1">
+                      Resolve
+                    </button>
+                  )}
+                </div>
+                {row.metadata && <pre className="mt-2 max-h-28 overflow-auto rounded-sm bg-secondary/40 p-2">{metadataPreview(row.metadata)}</pre>}
+              </div>
+            ))}
+            {errors.length === 0 && <p className="text-sm text-muted-foreground">No system errors for this filter.</p>}
+          </div>
+        </div>
+
+        <div className="rounded-sm border border-border p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="eyebrow">Audit</p>
+              <h3 className="mt-1 font-display text-2xl">Admin audit log</h3>
+            </div>
+            <button onClick={exportAudit} className="rounded-full border border-border px-3 py-1.5 text-xs">
+              Export CSV
+            </button>
+          </div>
+          <div className="mt-4 space-y-2 text-xs">
+            {auditLogs.slice(0, 30).map((row: any) => (
+              <div key={row.id} className="rounded-sm border border-border p-3">
+                <p className="font-medium">{row.entity_type} · {row.action}</p>
+                <p className="text-muted-foreground">{row.summary || row.entity_id || "No summary"}</p>
+                <p className="text-muted-foreground">{new Date(row.created_at).toLocaleString("en-IN")}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-sm border border-border p-4">
+        <p className="eyebrow">Readiness</p>
+        <h3 className="mt-1 font-display text-2xl">Backup and recovery checklist</h3>
+        <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+          {[
+            "Supabase PITR/backups enabled for production project",
+            "Monthly database export tested",
+            "Storage buckets backed up: product-images, lookbook-images, business-media, payment-screenshots",
+            "Vercel env vars match .env.example and production checklist",
+            "Razorpay webhook secret configured and tested",
+            "Brevo sender/domain verified and webhook token configured",
+            "CRON_SECRET configured for /api/admin/cron/run",
+            "Restore procedure documented in docs/production-readiness.md",
+          ].map((item) => (
+            <label key={item} className="flex items-center gap-2">
+              <input type="checkbox" readOnly /> {item}
+            </label>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -2299,6 +2937,7 @@ function OrdersAdmin() {
   const { settings } = useBusinessSettings();
   const confirmManualOrderFn = useServerFn(confirmManualOrder);
   const rejectManualPaymentFn = useServerFn(rejectManualPayment);
+  const resolveRefundFn = useServerFn(resolveRefund);
   const updateOrderOperationsFn = useServerFn(updateOrderOperations);
   const bulkUpdateOrdersFn = useServerFn(bulkUpdateOrders);
   const createShipmentFn = useServerFn(createShipment);
@@ -2310,7 +2949,24 @@ function OrdersAdmin() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [page, setPage] = useState(0);
+  const [paymentDraft, setPaymentDraft] = useState<Partial<PaymentMethod> | null>(null);
   const pageSize = 50;
+  const { data: paymentMethods = [] } = useAdminPaymentMethods();
+  const { data: refunds = [] } = useRefundRequests();
+  const { data: paymentAnalytics = {} } = usePaymentAnalytics();
+  const savePaymentMethod = useSavePaymentMethod();
+  const { data: paymentLedger = [] } = useQuery({
+    queryKey: ["admin-payment-ledger"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("payment_ledger" as any)
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(250);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["admin-orders", page],
@@ -2385,6 +3041,8 @@ function OrdersAdmin() {
       qc.invalidateQueries({ queryKey: ["admin-orders"] });
       qc.invalidateQueries({ queryKey: ["admin-products"] });
       qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["admin-payment-ledger"] });
+      qc.invalidateQueries({ queryKey: ["payment-analytics-v2"] });
       toast.success("Order confirmed and stock updated.");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not confirm order."),
@@ -2399,9 +3057,50 @@ function OrdersAdmin() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-orders"] });
+      qc.invalidateQueries({ queryKey: ["admin-payment-ledger"] });
+      qc.invalidateQueries({ queryKey: ["payment-analytics-v2"] });
       toast.success("Payment rejected.");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not reject payment."),
+  });
+
+  const resolveRefundMutation = useMutation({
+    mutationFn: async ({
+      refundId,
+      orderId,
+      status,
+      amount,
+      reference,
+      notes,
+    }: {
+      refundId: string;
+      orderId: string;
+      status: "approved" | "rejected" | "completed";
+      amount?: number;
+      reference?: string;
+      notes?: string;
+    }) => {
+      if (!session?.access_token) throw new Error("Please sign in again.");
+      await resolveRefundFn({
+        data: {
+          refundId,
+          orderId,
+          status,
+          amount,
+          reference,
+          notes,
+          accessToken: session.access_token,
+        },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-orders"] });
+      qc.invalidateQueries({ queryKey: ["refund-requests"] });
+      qc.invalidateQueries({ queryKey: ["admin-payment-ledger"] });
+      qc.invalidateQueries({ queryKey: ["payment-analytics-v2"] });
+      toast.success("Refund updated.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not update refund."),
   });
 
   const updateOps = useMutation({
@@ -2496,6 +3195,155 @@ function OrdersAdmin() {
         ))}
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-sm border border-border p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="eyebrow">Payment Settings</p>
+              <h3 className="mt-1 font-display text-2xl">Methods</h3>
+            </div>
+            {paymentDraft && (
+              <button
+                type="button"
+                onClick={() =>
+                  savePaymentMethod.mutate(paymentDraft, {
+                    onSuccess: () => {
+                      setPaymentDraft(null);
+                      toast.success("Payment method saved.");
+                    },
+                    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save method."),
+                  })
+                }
+                className="rounded-full bg-primary px-4 py-2 text-xs uppercase tracking-[0.18em] text-primary-foreground"
+              >
+                Save
+              </button>
+            )}
+          </div>
+          <div className="mt-4 space-y-3">
+            {paymentMethods.map((pm) => (
+              <div key={pm.method_key} className="rounded-sm border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{pm.display_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {pm.method_key} · {pm.enabled ? "enabled" : "disabled"} · fee {inr(Number(pm.extra_fee || 0))}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentDraft(pm)}
+                    className="rounded-full border border-border px-3 py-1.5 text-xs"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {paymentDraft && (
+            <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+              <Field label="Display name">
+                <input className={inputCls} value={paymentDraft.display_name ?? ""} onChange={(e) => setPaymentDraft({ ...paymentDraft, display_name: e.target.value })} />
+              </Field>
+              <Field label="Enabled">
+                <select className={inputCls} value={paymentDraft.enabled ? "true" : "false"} onChange={(e) => setPaymentDraft({ ...paymentDraft, enabled: e.target.value === "true" })}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </Field>
+              <Field label="Min amount">
+                <input type="number" className={inputCls} value={paymentDraft.min_order_amount ?? 0} onChange={(e) => setPaymentDraft({ ...paymentDraft, min_order_amount: Number(e.target.value) })} />
+              </Field>
+              <Field label="Max amount">
+                <input type="number" className={inputCls} value={paymentDraft.max_order_amount ?? ""} onChange={(e) => setPaymentDraft({ ...paymentDraft, max_order_amount: e.target.value ? Number(e.target.value) : null })} />
+              </Field>
+              <Field label="Extra fee">
+                <input type="number" className={inputCls} value={paymentDraft.extra_fee ?? 0} onChange={(e) => setPaymentDraft({ ...paymentDraft, extra_fee: Number(e.target.value) })} />
+              </Field>
+              <Field label="Sort order">
+                <input type="number" className={inputCls} value={paymentDraft.sort_order ?? 0} onChange={(e) => setPaymentDraft({ ...paymentDraft, sort_order: Number(e.target.value) })} />
+              </Field>
+              <Field label="Recommended">
+                <select className={inputCls} value={paymentDraft.recommended ? "true" : "false"} onChange={(e) => setPaymentDraft({ ...paymentDraft, recommended: e.target.value === "true" })}>
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </Field>
+              <Field label="Verification time">
+                <input className={inputCls} value={paymentDraft.verification_time ?? ""} onChange={(e) => setPaymentDraft({ ...paymentDraft, verification_time: e.target.value })} />
+              </Field>
+              <div className="sm:col-span-2">
+                <Field label="Instructions">
+                  <textarea rows={3} className={inputCls} value={paymentDraft.instructions ?? ""} onChange={(e) => setPaymentDraft({ ...paymentDraft, instructions: e.target.value })} />
+                </Field>
+              </div>
+              <div className="sm:col-span-2">
+                <Field label="Public details JSON">
+                  <textarea
+                    rows={3}
+                    className={inputCls}
+                    value={JSON.stringify(paymentDraft.public_details ?? {}, null, 2)}
+                    onChange={(e) => {
+                      try {
+                        setPaymentDraft({ ...paymentDraft, public_details: JSON.parse(e.target.value || "{}") });
+                      } catch {
+                        setPaymentDraft({ ...paymentDraft });
+                      }
+                    }}
+                  />
+                </Field>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-sm border border-border p-4">
+          <p className="eyebrow">Payment Analytics</p>
+          <h3 className="mt-1 font-display text-2xl">Summary</h3>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {[
+              ["Fees Collected", inr(Number((paymentAnalytics as any).feesCollected || 0))],
+              ["UPI Pending", (paymentAnalytics as any).pending?.upi ?? 0],
+              ["Bank Pending", (paymentAnalytics as any).pending?.bankTransfer ?? 0],
+              ["COD Pending", (paymentAnalytics as any).pending?.cod ?? 0],
+              ["Razorpay Paid", (paymentAnalytics as any).razorpay?.paid ?? 0],
+              ["Razorpay Failed", (paymentAnalytics as any).razorpay?.failed ?? 0],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-sm border border-border p-3">
+                <p className="text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+                <p className="mt-1 font-display text-xl">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Refunds</p>
+            <div className="mt-3 space-y-2">
+              {refunds.slice(0, 6).map((refund: any) => (
+                <div key={refund.id} className="rounded-sm border border-border p-3 text-xs">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{refund.orders?.order_number || refund.order_id}</p>
+                      <p className="text-muted-foreground">{statusLabel(refund.status)} · {inr(Number(refund.amount || 0))}</p>
+                    </div>
+                    {refund.status !== "completed" && refund.status !== "rejected" && (
+                      <div className="flex gap-1">
+                        <button onClick={() => resolveRefundMutation.mutate({ refundId: refund.id, orderId: refund.order_id, status: "approved", amount: Number(refund.amount || 0) })} className="rounded-full border border-border px-2 py-1">Approve</button>
+                        <button onClick={() => {
+                          const reference = prompt("Refund reference?") ?? "";
+                          resolveRefundMutation.mutate({ refundId: refund.id, orderId: refund.order_id, status: "completed", amount: Number(refund.amount || 0), reference });
+                        }} className="rounded-full border border-border px-2 py-1">Complete</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {refunds.length === 0 && <p className="text-xs text-muted-foreground">No refund requests yet.</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-sm border border-border p-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
           <label className="relative">
@@ -2567,15 +3415,22 @@ function OrdersAdmin() {
       {filteredOrders.length === 0 ? (
         <p className="text-sm text-muted-foreground">No matching orders.</p>
       ) : filteredOrders.map((o: any) => {
-        const canApproveUpi =
-          o.payment_method === "upi" &&
+        const manualProofMethod = ["upi", "bank_transfer"].includes(o.payment_method);
+        const canApproveManual =
+          manualProofMethod &&
           o.payment_status === "under_review" &&
           o.status !== "confirmed";
         const canConfirmManual =
-          o.payment_method !== "upi" && o.payment_method !== "razorpay" && !o.stock_deducted_at;
+          (o.payment_method === "cod" && o.payment_status === "cod_pending") ||
+          (o.payment_method !== "upi" &&
+            o.payment_method !== "bank_transfer" &&
+            o.payment_method !== "razorpay" &&
+            !o.stock_deducted_at);
         const canReject =
-          o.payment_method === "upi" &&
-          !["confirmed", "expired", "payment_rejected"].includes(o.status);
+          ["upi", "bank_transfer", "cod"].includes(o.payment_method) &&
+          !["confirmed", "expired", "payment_rejected", "cancelled"].includes(o.status) &&
+          !["approved", "paid", "manual_confirmed"].includes(o.payment_status);
+        const orderLedger = paymentLedger.filter((entry: any) => entry.order_id === o.id);
         const events = [
           ...(o.order_events ?? []).map((event: any) => ({
             ...event,
@@ -2622,16 +3477,16 @@ function OrdersAdmin() {
               <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">
                 {o.payment_method} · {statusLabel(o.payment_status)} · {statusLabel(o.operational_status || o.status)}
               </p>
-              {(canApproveUpi || canConfirmManual || canReject) && (
+              {(canApproveManual || canConfirmManual || canReject) && (
                 <div className="mt-2 flex flex-wrap justify-end gap-2">
-                  {(canApproveUpi || canConfirmManual) && (
+                  {(canApproveManual || canConfirmManual) && (
                     <button
                       disabled={confirmManual.isPending}
                       onClick={() => confirmManual.mutate(o.id)}
                       className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-xs"
                     >
                       {confirmManual.isPending && <Loader2 size={12} className="animate-spin" />}
-                      {o.payment_method === "upi" ? "Approve payment" : "Confirm order"}
+                      {manualProofMethod ? "Approve payment" : "Confirm order"}
                     </button>
                   )}
                   {canReject && (
@@ -2652,13 +3507,15 @@ function OrdersAdmin() {
           </div>
           <p className="mt-3 text-sm text-muted-foreground">{o.address}</p>
           {Number(o.stock ?? 0) <= Number(o.low_stock_threshold ?? 5) && false}
-          {o.payment_method === "upi" && (
+          {manualProofMethod && (
             <div className="mt-3 rounded-sm border border-border bg-secondary/30 p-3 text-sm">
+              {o.payment_method === "upi" && (
+                <p>
+                  <span className="text-muted-foreground">UPI ID:</span> {settings.upi_id}
+                </p>
+              )}
               <p>
-                <span className="text-muted-foreground">UPI ID:</span> {settings.upi_id}
-              </p>
-              <p>
-                <span className="text-muted-foreground">UTR:</span>{" "}
+                <span className="text-muted-foreground">Reference:</span>{" "}
                 {o.payment_utr || "Not submitted"}
               </p>
               <p className="mt-1 text-muted-foreground">
@@ -2692,6 +3549,21 @@ function OrdersAdmin() {
                   Rejection reason: {o.payment_rejection_reason}
                 </p>
               )}
+            </div>
+          )}
+          {orderLedger.length > 0 && (
+            <div className="mt-3 rounded-sm border border-border bg-background p-3 text-xs">
+              <p className="uppercase tracking-[0.18em] text-muted-foreground">Payment ledger</p>
+              <div className="mt-2 space-y-1">
+                {orderLedger.map((entry: any) => (
+                  <p key={entry.id} className="flex flex-wrap justify-between gap-2">
+                    <span>{statusLabel(entry.status)} · {entry.method} · {inr(Number(entry.amount || 0))}</span>
+                    <span className="text-muted-foreground">
+                      {entry.reference_id || entry.provider_payment_id || entry.provider_order_id || "no reference"} · {new Date(entry.created_at).toLocaleString("en-IN")}
+                    </span>
+                  </p>
+                ))}
+              </div>
             </div>
           )}
           <ul className="mt-3 space-y-1 border-t border-border pt-3 text-sm">

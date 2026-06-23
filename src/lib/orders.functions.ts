@@ -13,7 +13,7 @@ const createOrderSchema = z.object({
   phone: z.string().trim().min(8).max(20).transform((v) => v.replace(/[^\d+]/g, "")),
   email: z.string().trim().toLowerCase().email().max(255).or(z.literal("")),
   address: z.string().trim().min(10).max(600).transform((v) => v.replace(/\s+/g, " ")),
-  payment_method: z.enum(["whatsapp", "upi", "razorpay"]),
+  payment_method: z.enum(["whatsapp", "upi", "razorpay", "cod", "bank_transfer"]),
   coupon_code: z.string().trim().max(80).optional(),
   pincode: z.string().trim().max(12).optional(),
   shipping_mode: z.enum(["standard", "express"]).optional(),
@@ -37,6 +37,7 @@ const confirmManualOrderSchema = z.object({
 
 const submitUpiPaymentSchema = z.object({
   orderId: z.string().uuid(),
+  method: z.enum(["upi", "bank_transfer"]).optional(),
   payment_utr: z
     .string()
     .trim()
@@ -44,6 +45,23 @@ const submitUpiPaymentSchema = z.object({
     .max(80)
     .transform((v) => v.replace(/\s+/g, "").toUpperCase()),
   payment_screenshot_url: z.string().trim().url().max(1000).or(z.literal("")).optional(),
+});
+
+const requestRefundSchema = z.object({
+  orderId: z.string().uuid(),
+  amount: z.number().positive().max(1_000_000),
+  reason: z.string().trim().min(3).max(1000),
+  accessToken: z.string().optional(),
+});
+
+const resolveRefundSchema = z.object({
+  refundId: z.string().uuid(),
+  orderId: z.string().uuid(),
+  status: z.enum(["approved", "rejected", "completed"]),
+  amount: z.number().positive().max(1_000_000).optional(),
+  reference: z.string().trim().max(160).optional(),
+  notes: z.string().trim().max(1000).optional(),
+  accessToken: z.string().min(20),
 });
 
 const rejectManualPaymentSchema = z.object({
@@ -137,6 +155,17 @@ type CheckoutSettings = {
   estimatedDeliveryDays: string;
 };
 
+type PaymentMethodConfig = {
+  method_key: string;
+  display_name: string;
+  enabled: boolean;
+  min_order_amount: number;
+  max_order_amount: number | null;
+  extra_fee: number;
+  provider: string;
+  public_details: Record<string, unknown> | null;
+};
+
 const numberSetting = (
   rows: Map<string, string>,
   key: string,
@@ -171,6 +200,41 @@ async function loadCheckoutSettings(supabaseAdmin: any): Promise<CheckoutSetting
     paymentTimeoutMinutes: numberSetting(rows, "payment_timeout_minutes", 30, 1),
     estimatedDeliveryDays: rows.get("estimated_delivery_days") || "3-7",
   };
+}
+
+async function loadPaymentMethodConfig(
+  supabaseAdmin: any,
+  method: string,
+): Promise<PaymentMethodConfig | null> {
+  if (method === "whatsapp") {
+    return {
+      method_key: "whatsapp",
+      display_name: "WhatsApp",
+      enabled: true,
+      min_order_amount: 0,
+      max_order_amount: null,
+      extra_fee: 0,
+      provider: "manual_whatsapp",
+      public_details: {},
+    };
+  }
+  const { data, error } = await supabaseAdmin
+    .from("payment_methods")
+    .select("method_key,display_name,enabled,min_order_amount,max_order_amount,extra_fee,provider,public_details")
+    .eq("method_key", method)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function assertPaymentMethodAvailable(config: PaymentMethodConfig | null, subtotal: number) {
+  if (!config || !config.enabled) throw new Error("Selected payment method is unavailable.");
+  if (subtotal < Number(config.min_order_amount || 0)) {
+    throw new Error(`${config.display_name} requires a minimum order of ₹${Number(config.min_order_amount).toLocaleString("en-IN")}.`);
+  }
+  if (config.max_order_amount != null && subtotal > Number(config.max_order_amount)) {
+    throw new Error(`${config.display_name} is available only up to ₹${Number(config.max_order_amount).toLocaleString("en-IN")}.`);
+  }
 }
 
 function calculateShipping(subtotal: number, settings: CheckoutSettings, express?: boolean) {
@@ -333,6 +397,8 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
     });
 
     const subtotal = orderItems.reduce((sum, item) => sum + item.qty * item.price, 0);
+    const paymentConfig = await loadPaymentMethodConfig(supabaseAdmin, data.payment_method);
+    assertPaymentMethodAvailable(paymentConfig, subtotal);
     const checkoutSettings = await loadCheckoutSettings(supabaseAdmin);
     const totals = calculateTotals(subtotal, checkoutSettings, data.express || data.shipping_mode === "express");
     const coupon = await applyCouponIfValid(
@@ -342,11 +408,33 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       subtotal,
       totals.shipping,
     );
-    const finalTotal = Math.max(0, totals.total - coupon.discount);
+    const paymentFee = Math.max(0, Number(paymentConfig?.extra_fee || 0));
+    const finalTotal = Math.max(0, totals.total + paymentFee - coupon.discount);
     const paymentExpiresAt =
-      data.payment_method === "upi"
+      data.payment_method === "upi" || data.payment_method === "bank_transfer"
         ? new Date(Date.now() + checkoutSettings.paymentTimeoutMinutes * 60 * 1000).toISOString()
         : null;
+    const initialPaymentStatus: Record<string, string> = {
+      upi: "awaiting_payment",
+      bank_transfer: "awaiting_payment",
+      cod: "cod_pending",
+      razorpay: "pending",
+      whatsapp: "pending",
+    };
+    const initialStatus: Record<string, string> = {
+      upi: "awaiting_payment",
+      bank_transfer: "awaiting_payment",
+      cod: "cod_pending",
+      razorpay: "payment_pending",
+      whatsapp: "new",
+    };
+    const initialOperationalStatus: Record<string, string> = {
+      upi: "payment_pending",
+      bank_transfer: "payment_pending",
+      cod: "cod_pending",
+      razorpay: "payment_pending",
+      whatsapp: "order_created",
+    };
 
     const { data: order, error: orderError } = await supabaseAdmin
       .from("orders")
@@ -360,13 +448,16 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
         subtotal_amount: subtotal,
         shipping_fee: totals.shipping,
         packaging_fee: totals.packaging,
+        payment_fee: paymentFee,
         discount_amount: coupon.discount,
         tax_amount: totals.tax,
         shipping_mode: data.express || data.shipping_mode === "express" ? "express" : "standard",
         shipping_provider: "manual",
         payment_method: data.payment_method,
-        payment_status: data.payment_method === "upi" ? "awaiting_payment" : "pending",
-        status: data.payment_method === "upi" ? "awaiting_payment" : "new",
+        payment_provider: paymentConfig?.provider || null,
+        payment_status: initialPaymentStatus[data.payment_method] || "pending",
+        status: initialStatus[data.payment_method] || "new",
+        operational_status: initialOperationalStatus[data.payment_method] || "order_created",
         payment_expires_at: paymentExpiresAt,
         user_id: userId,
       })
@@ -398,7 +489,21 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       p_visible_to_customer: true,
     });
 
-    if (data.payment_method === "upi") {
+    await supabaseAdmin.rpc("log_payment_ledger", {
+      p_order_id: order.id,
+      p_method: data.payment_method,
+      p_provider: paymentConfig?.provider || "manual",
+      p_amount: finalTotal,
+      p_fee: paymentFee,
+      p_status: initialPaymentStatus[data.payment_method] || "pending",
+      p_reference_id: null,
+      p_provider_order_id: null,
+      p_provider_payment_id: null,
+      p_failure_reason: null,
+      p_raw_metadata: { source: "checkout" },
+    });
+
+    if (["upi", "bank_transfer", "cod"].includes(data.payment_method)) {
       const { error: reserveError } = await supabaseAdmin.rpc("apply_order_stock_locked", {
         p_order_id: order.id,
       });
@@ -437,6 +542,8 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       total: finalTotal,
       paymentMethod: data.payment_method,
       paymentExpiresAt,
+      paymentFee,
+      paymentDetails: paymentConfig?.public_details || {},
       discount: coupon.discount,
       couponCode: coupon.code,
     };
@@ -446,14 +553,15 @@ export const submitUpiPaymentReference = createServerFn({ method: "POST" })
   .inputValidator((data) => submitUpiPaymentSchema.parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const method = data.method || "upi";
     const { data: existing, error: existingError } = await supabaseAdmin
       .from("orders")
-      .select("id,payment_expires_at,payment_status,status")
+      .select("id,payment_expires_at,payment_status,status,total,payment_fee,payment_provider,razorpay_order_id,razorpay_payment_id")
       .eq("id", data.orderId)
-      .eq("payment_method", "upi")
+      .eq("payment_method", method)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (!existing) throw new Error("UPI order not found.");
+    if (!existing) throw new Error("Manual payment order not found.");
     if (existing.payment_status === "expired" || existing.status === "expired") {
       throw new Error("This payment link has expired. Please generate a new order.");
     }
@@ -466,6 +574,7 @@ export const submitUpiPaymentReference = createServerFn({ method: "POST" })
       .from("orders")
       .update({
         payment_utr: data.payment_utr,
+        payment_reference: data.payment_utr,
         payment_screenshot_url: data.payment_screenshot_url || null,
         payment_status: "under_review",
         operational_status: "payment_under_review",
@@ -473,7 +582,7 @@ export const submitUpiPaymentReference = createServerFn({ method: "POST" })
         payment_submitted_at: new Date().toISOString(),
       })
       .eq("id", data.orderId)
-      .eq("payment_method", "upi")
+      .eq("payment_method", method)
       .in("payment_status", ["awaiting_payment", "under_review", "rejected"])
       .select("id")
       .maybeSingle();
@@ -483,8 +592,21 @@ export const submitUpiPaymentReference = createServerFn({ method: "POST" })
       p_order_id: data.orderId,
       p_event_type: "payment_submitted",
       p_label: "Payment Submitted",
-      p_details: { payment_utr: data.payment_utr },
+      p_details: { payment_reference: data.payment_utr, method },
       p_visible_to_customer: true,
+    });
+    await supabaseAdmin.rpc("log_payment_ledger", {
+      p_order_id: data.orderId,
+      p_method: method,
+      p_provider: existing.payment_provider || "manual",
+      p_amount: existing.total,
+      p_fee: existing.payment_fee || 0,
+      p_status: "under_review",
+      p_reference_id: data.payment_utr,
+      p_provider_order_id: existing.razorpay_order_id || null,
+      p_provider_payment_id: existing.razorpay_payment_id || null,
+      p_failure_reason: null,
+      p_raw_metadata: { screenshot_url: data.payment_screenshot_url || null },
     });
     return { ok: true };
   });
@@ -493,12 +615,21 @@ export const confirmManualOrder = createServerFn({ method: "POST" })
   .inputValidator((data) => confirmManualOrderSchema.parse(data))
   .handler(async ({ data }) => {
     const { requireOwnerAdmin } = await import("@/lib/admin.server");
-    await requireOwnerAdmin(data.accessToken);
+    const admin = await requireOwnerAdmin(data.accessToken);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: result, error } = await supabaseAdmin.rpc("confirm_manual_order", {
       p_order_id: data.orderId,
     });
     if (error) throw error;
+    await supabaseAdmin
+      .from("orders")
+      .update({ payment_verified_by: admin.id })
+      .eq("id", data.orderId);
+    await supabaseAdmin
+      .from("payment_ledger")
+      .update({ verified_by: admin.id })
+      .eq("order_id", data.orderId)
+      .in("status", ["approved", "manual_confirmed"]);
     const { data: order } = await supabaseAdmin
       .from("orders")
       .select("user_id,total,order_number")
@@ -569,6 +700,133 @@ export const expireUpiOrder = createServerFn({ method: "POST" })
       p_visible_to_customer: true,
     });
     return result;
+  });
+
+export const requestRefund = createServerFn({ method: "POST" })
+  .inputValidator((data) => requestRefundSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    let userId: string | null = null;
+    if (data.accessToken) {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+      if (supabaseUrl && publishableKey) {
+        const { createClient } = await import("@supabase/supabase-js");
+        const userClient = createClient(supabaseUrl, publishableKey, {
+          auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
+        });
+        const { data: userResult } = await userClient.auth.getUser(data.accessToken);
+        userId = userResult.user?.id ?? null;
+      }
+    }
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from("orders")
+      .select("id,user_id,total,order_number")
+      .eq("id", data.orderId)
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!order) throw new Error("Order not found.");
+    if (order.user_id && userId !== order.user_id) throw new Error("You can only request refunds for your own orders.");
+    if (data.amount > Number(order.total || 0)) throw new Error("Refund amount cannot exceed order total.");
+
+    const { data: refund, error } = await supabaseAdmin
+      .from("refund_requests")
+      .insert({
+        order_id: data.orderId,
+        requested_by: userId,
+        amount: data.amount,
+        reason: data.reason,
+        status: "requested",
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        refund_status: "refund_requested",
+        refund_reason: data.reason,
+        refund_amount: data.amount,
+      })
+      .eq("id", data.orderId);
+    await supabaseAdmin.rpc("append_order_event", {
+      p_order_id: data.orderId,
+      p_event_type: "refund_requested",
+      p_label: "Refund Requested",
+      p_details: { amount: data.amount, reason: data.reason },
+      p_visible_to_customer: true,
+    });
+    sendOrderStatusEmail({ orderId: data.orderId, templateKey: "refund_initiated" }).catch((error) => {
+      console.warn("[orders] refund request email failed", error);
+    });
+    return { ok: true, refundId: refund.id };
+  });
+
+export const resolveRefund = createServerFn({ method: "POST" })
+  .inputValidator((data) => resolveRefundSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { requireOwnerAdmin } = await import("@/lib/admin.server");
+    const admin = await requireOwnerAdmin(data.accessToken);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const statusMap = {
+      approved: "refund_approved",
+      rejected: "refund_rejected",
+      completed: "refund_completed",
+    } as const;
+    const { data: refund, error: refundError } = await supabaseAdmin
+      .from("refund_requests")
+      .update({
+        status: data.status,
+        amount: data.amount,
+        refund_reference: data.reference || null,
+        admin_notes: data.notes || null,
+        resolved_by: admin.id,
+        resolved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", data.refundId)
+      .select("id,amount,provider,order_id")
+      .single();
+    if (refundError) throw refundError;
+    const refundStatus = statusMap[data.status];
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        refund_status: refundStatus,
+        refund_amount: data.amount ?? refund.amount,
+        refund_reference: data.reference || null,
+        refund_notes: data.notes || null,
+      })
+      .eq("id", data.orderId);
+    await supabaseAdmin.rpc("append_order_event", {
+      p_order_id: data.orderId,
+      p_event_type: refundStatus,
+      p_label: data.status === "completed" ? "Refund Completed" : data.status === "approved" ? "Refund Approved" : "Refund Rejected",
+      p_details: { amount: data.amount ?? refund.amount, reference: data.reference || null, notes: data.notes || null },
+      p_visible_to_customer: true,
+    });
+    if (data.status === "completed") {
+      await supabaseAdmin.rpc("log_payment_ledger", {
+        p_order_id: data.orderId,
+        p_method: "refund",
+        p_provider: refund.provider || "manual",
+        p_amount: -(data.amount ?? refund.amount),
+        p_fee: 0,
+        p_status: "refund_completed",
+        p_reference_id: data.reference || null,
+        p_provider_order_id: null,
+        p_provider_payment_id: null,
+        p_failure_reason: null,
+        p_raw_metadata: { notes: data.notes || null },
+      });
+    }
+    sendOrderStatusEmail({
+      orderId: data.orderId,
+      templateKey: data.status === "completed" ? "refund_completed" : "refund_initiated",
+    }).catch((error) => {
+      console.warn("[orders] refund resolution email failed", error);
+    });
+    return { ok: true };
   });
 
 export const updateOrderOperations = createServerFn({ method: "POST" })

@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth";
 import { useReviews, useSubmitReview } from "@/lib/reviews";
 import { ProductCard } from "@/components/site/ProductCard";
 import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
+import { useSimilarProducts } from "@/lib/growth";
 import { useRecentlyViewed, useTrackRecentlyViewed } from "@/lib/customer-engagement";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAnalyticsEvent } from "@/lib/analytics";
@@ -41,6 +42,7 @@ function ProductPage() {
   const { data: product, isLoading } = useProduct(slug);
   const { data: all = [] } = useProducts();
   const { data: variants = [] } = useVariants(product?.id);
+  const { data: similarProducts = [] } = useSimilarProducts(product);
   const { settings } = useBusinessSettings();
   const { addItem, setOpen } = useCart();
   const { user } = useAuth();
@@ -463,6 +465,18 @@ function ReviewsSection({ product }: { product: Product }) {
           )}
         </aside>
       </div>
+
+      {similarProducts.length > 0 && (
+        <section className="mt-16 border-t border-border pt-12">
+          <p className="eyebrow">Recommended</p>
+          <h2 className="mt-2 font-display text-3xl">Similar pieces</h2>
+          <div className="mt-8 grid gap-x-6 gap-y-12 sm:grid-cols-2 lg:grid-cols-4">
+            {similarProducts.map((item) => (
+              <ProductCard key={item.id} product={item} />
+            ))}
+          </div>
+        </section>
+      )}
     </section>
   );
 }

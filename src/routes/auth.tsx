@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
+const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
+
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Sign in — Superb Creations" }] }),
   component: AuthPage,
@@ -11,38 +13,48 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { isAdmin, loading, user } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const userIsAdmin = user?.email?.toLowerCase() === OWNER_ADMIN_EMAIL || isAdmin;
 
   useEffect(() => {
-    if (user) navigate({ to: "/account" });
-  }, [user, navigate]);
+    if (loading || !user) return;
+    navigate({ to: userIsAdmin ? "/admin" : "/account", replace: true });
+  }, [loading, navigate, user, userIsAdmin]);
 
   const handleEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/account`,
+            emailRedirectTo: `${window.location.origin}/auth`,
             data: { full_name: name },
           },
         });
         if (error) throw error;
         toast.success("Account created. You're signed in.");
+        const signedUpEmail = data.user?.email ?? email;
+        navigate({
+          to: signedUpEmail.toLowerCase() === OWNER_ADMIN_EMAIL ? "/admin" : "/account",
+        });
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        const signedInEmail = data.user?.email ?? email;
+        navigate({
+          to: signedInEmail.toLowerCase() === OWNER_ADMIN_EMAIL ? "/admin" : "/account",
+        });
         toast.success("Welcome back.");
+        return;
       }
-      navigate({ to: "/account" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -55,7 +67,7 @@ function AuthPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/account`,
+        redirectTo: `${window.location.origin}/auth`,
       },
     });
     if (error) {

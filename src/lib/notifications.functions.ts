@@ -404,6 +404,67 @@ export async function sendTemplatedEmail(args: {
   });
 }
 
+export async function processEmailQueueBatch(limit = 25) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: rows, error } = await (supabaseAdmin as any)
+    .from("email_queue")
+    .select("*")
+    .in("status", ["queued", "failed"])
+    .lte("next_attempt_at", new Date().toISOString())
+    .order("next_attempt_at", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  let sent = 0;
+  let failed = 0;
+  let permanentlyFailed = 0;
+
+  for (const row of (rows ?? []).filter((item: any) => Number(item.attempts || 0) < Number(item.max_attempts || 5))) {
+    const attempts = Number(row.attempts || 0) + 1;
+    try {
+      const result = await sendTemplatedEmail({
+        templateKey: row.template_key,
+        to: row.recipient,
+        variables: row.variables ?? {},
+        idempotencyKey: row.idempotency_key || `queue:${row.id}`,
+      });
+      if (result.ok) {
+        sent += 1;
+        await (supabaseAdmin as any)
+          .from("email_queue")
+          .update({
+            status: "sent",
+            attempts,
+            last_error: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", row.id);
+      } else {
+        throw new Error((result as any).error || "Email send skipped or failed");
+      }
+    } catch (error) {
+      failed += 1;
+      const maxAttempts = Number(row.max_attempts || 5);
+      const permanent = attempts >= maxAttempts;
+      if (permanent) permanentlyFailed += 1;
+      const delayMinutes = Math.min(24 * 60, Math.pow(2, attempts) * 5);
+      await (supabaseAdmin as any)
+        .from("email_queue")
+        .update({
+          status: permanent ? "permanently_failed" : "failed",
+          attempts,
+          next_attempt_at: new Date(Date.now() + delayMinutes * 60 * 1000).toISOString(),
+          permanently_failed_at: permanent ? new Date().toISOString() : null,
+          last_error: error instanceof Error ? error.message.slice(0, 1000) : "Email queue processing failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+    }
+  }
+
+  return { scanned: rows?.length ?? 0, sent, failed, permanentlyFailed };
+}
+
 export async function syncBrevoContact(args: {
   email: string;
   name?: string;

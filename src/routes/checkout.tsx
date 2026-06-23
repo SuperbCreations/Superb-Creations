@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { MessageCircle, Loader2, LogIn, Smartphone, Upload } from "lucide-react";
+import { MessageCircle, Loader2, LogIn, Smartphone, Upload, CreditCard, Banknote, Landmark } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
@@ -22,6 +22,8 @@ import {
   expireUpiOrder,
   submitUpiPaymentReference,
 } from "@/lib/orders.functions";
+import { createRazorpayOrder, markRazorpayPaymentFailed, verifyRazorpayPayment } from "@/lib/razorpay.functions";
+import { usePaymentMethods, type PaymentMethod } from "@/lib/payments";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/checkout")({
@@ -49,17 +51,26 @@ type CheckoutOrderResult = {
   estimatedDelivery?: string;
   paymentMethod: string;
   paymentExpiresAt: string | null;
+  paymentFee?: number;
+  paymentDetails?: Record<string, unknown>;
 };
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
 
 function Checkout() {
   const navigate = useNavigate();
   const { items, subtotal, clear } = useCart();
   const { user, session } = useAuth();
   const { settings } = useBusinessSettings();
+  const { data: paymentMethods = [] } = usePaymentMethods();
   const { data: addresses = [] } = useCustomerAddresses(user?.id);
   const validateCoupon = useValidateCoupon();
   const [form, setForm] = useState({ customer_name: "", phone: "", email: "", address: "" });
-  const [method, setMethod] = useState<"whatsapp" | "upi">("whatsapp");
+  const [method, setMethod] = useState<"whatsapp" | "upi" | "razorpay" | "cod" | "bank_transfer">("upi");
   const [couponCode, setCouponCode] = useState("");
   const [couponDiscount, setCouponDiscount] = useState(0);
   const [couponMessage, setCouponMessage] = useState("");
@@ -86,21 +97,37 @@ function Checkout() {
   const quoteShipping = useServerFn(calculateShippingQuote);
   const submitUpiPayment = useServerFn(submitUpiPaymentReference);
   const expireOrder = useServerFn(expireUpiOrder);
+  const createRazorpay = useServerFn(createRazorpayOrder);
+  const verifyRazorpay = useServerFn(verifyRazorpayPayment);
+  const failRazorpay = useServerFn(markRazorpayPaymentFailed);
 
   const checkoutSettings = settings;
   const checkoutEnabled = settingBool(checkoutSettings, "enable_checkout");
   const whatsappEnabled = settingBool(checkoutSettings, "enable_whatsapp");
-  const upiEnabled = settingBool(checkoutSettings, "enable_upi");
   const taxPercentage = settingNumber(checkoutSettings, "tax_percentage");
   const shipping = shippingQuote?.shipping ?? 0;
   const packagingCharge = shippingQuote?.packaging ?? 0;
   const tax = Math.round(((subtotal + shipping + packagingCharge) * taxPercentage) / 100);
-  const total = Math.max(0, subtotal + shipping + packagingCharge + tax - couponDiscount);
+  const selectedPaymentMethod = paymentMethods.find((m) => m.method_key === method);
+  const paymentFee = method === "whatsapp" ? 0 : Number(selectedPaymentMethod?.extra_fee || 0);
+  const total = Math.max(0, subtotal + shipping + packagingCharge + tax + paymentFee - couponDiscount);
+  const availablePaymentMethods = paymentMethods;
+  const disabledReason = (m: PaymentMethod) => {
+    if (subtotal < Number(m.min_order_amount || 0)) return `Minimum order ${inr(Number(m.min_order_amount || 0))}`;
+    if (m.max_order_amount != null && subtotal > Number(m.max_order_amount)) return `Available up to ${inr(Number(m.max_order_amount))}`;
+    return "";
+  };
+  const paymentIcon = (key: string) => {
+    if (key === "razorpay") return <CreditCard size={20} className="mt-0.5 shrink-0" />;
+    if (key === "cod") return <Banknote size={20} className="mt-0.5 shrink-0" />;
+    if (key === "bank_transfer") return <Landmark size={20} className="mt-0.5 shrink-0" />;
+    return <Smartphone size={20} className="mt-0.5 shrink-0" />;
+  };
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const saveOrder = async (paymentMethod: "whatsapp" | "upi") =>
+  const saveOrder = async (paymentMethod: "whatsapp" | "upi" | "razorpay" | "cod" | "bank_transfer") =>
     createOrder({
       data: {
         customer_name: form.customer_name,
@@ -122,9 +149,12 @@ function Checkout() {
     });
 
   useEffect(() => {
-    if (!whatsappEnabled && upiEnabled) setMethod("upi");
-    if (whatsappEnabled && !upiEnabled) setMethod("whatsapp");
-  }, [upiEnabled, whatsappEnabled]);
+    if (paymentMethods.length === 0) return;
+    if (method !== "whatsapp" && !paymentMethods.some((m) => m.method_key === method)) {
+      const recommended = paymentMethods.find((m) => m.recommended) ?? paymentMethods[0];
+      setMethod(recommended.method_key as typeof method);
+    }
+  }, [method, paymentMethods]);
 
   useEffect(() => {
     if (items.length > 0) {
@@ -167,7 +197,8 @@ function Checkout() {
   }, [items, pincode, quoteShipping, shippingMode, subtotal]);
 
   const businessName = checkoutSettings.business_name || "Superb Creations";
-  const upiId = checkoutSettings.upi_id;
+  const upiId = String(selectedPaymentMethod?.public_details?.upi_id || checkoutSettings.upi_id);
+  const bankDetails = selectedPaymentMethod?.public_details ?? {};
   const upiIntent = useMemo(() => {
     if (!upiOrder) return "";
     const params = new URLSearchParams({
@@ -231,6 +262,20 @@ function Checkout() {
     setNow(Date.now());
   };
 
+  const loadRazorpayScript = () =>
+    new Promise<void>((resolve, reject) => {
+      if (window.Razorpay) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Could not load Razorpay checkout."));
+      document.body.appendChild(script);
+    });
+
   const copyText = async (text: string, label: string) => {
     await navigator.clipboard.writeText(text);
     toast.success(`${label} copied.`);
@@ -242,6 +287,19 @@ function Checkout() {
       .join("\n");
     return `Hi ${checkoutSettings.store_name}! I'd like to place an order:\n\n${lines}\n\nSubtotal: ${inr(order.subtotal)}\nShipping: ${order.shipping === 0 ? "Free" : inr(order.shipping)}\nPackaging: ${inr(order.packaging ?? 0)}\nTax: ${inr(order.tax ?? 0)}\nTotal: ${inr(order.total)}\nEstimated delivery: ${order.estimatedDelivery || shippingQuote?.estimatedDelivery || "To be confirmed"}\n\nOrder ID: ${order.orderId}\nName: ${form.customer_name}\nPhone: ${form.phone}\nAddress: ${form.address}`;
   };
+
+  const submitLabel =
+    method === "whatsapp"
+      ? "Place order on WhatsApp"
+      : method === "cod"
+        ? `Place COD order for ${inr(total)}`
+        : method === "razorpay"
+          ? `Pay online ${inr(total)}`
+          : upiOrder
+            ? expired
+              ? "Payment expired"
+              : "Submit payment reference"
+            : `Generate payment for ${inr(total)}`;
 
   const applyCoupon = async () => {
     if (!couponCode.trim()) return;
@@ -298,18 +356,103 @@ function Checkout() {
         return;
       }
 
-      if (!upiEnabled) throw new Error("UPI payments are currently unavailable.");
+      if (!selectedPaymentMethod && method !== "whatsapp") throw new Error("Selected payment method is unavailable.");
+      if (selectedPaymentMethod && subtotal < Number(selectedPaymentMethod.min_order_amount || 0)) {
+        throw new Error(`${selectedPaymentMethod.display_name} requires a higher order value.`);
+      }
+      if (selectedPaymentMethod?.max_order_amount != null && subtotal > Number(selectedPaymentMethod.max_order_amount)) {
+        throw new Error(`${selectedPaymentMethod.display_name} is not available for this order value.`);
+      }
+
+      if (method === "cod") {
+        const order = await saveOrder("cod");
+        trackAnalyticsEvent({
+          eventType: "order_placed",
+          userId: user?.id,
+          metadata: { method: "cod", total: order.total },
+        });
+        clear();
+        navigate({ to: "/order-success", search: { method: "cod", order: order.orderId, status: "cod_pending" } });
+        return;
+      }
+
+      if (method === "razorpay") {
+        const order = await saveOrder("razorpay");
+        const razorpayOrder = await createRazorpay({ data: { orderId: order.orderId } });
+        if (!razorpayOrder.configured) {
+          throw new Error("Razorpay is not configured yet. Please choose another payment method.");
+        }
+        await loadRazorpayScript();
+        await new Promise<void>((resolve, reject) => {
+          const RazorpayCheckout = window.Razorpay;
+          if (!RazorpayCheckout) {
+            reject(new Error("Razorpay checkout did not load."));
+            return;
+          }
+          const checkout = new RazorpayCheckout({
+            key: razorpayOrder.keyId,
+            amount: razorpayOrder.amount,
+            currency: "INR",
+            name: businessName,
+            description: `Order ${order.orderId}`,
+            order_id: razorpayOrder.razorpayOrderId,
+            handler: async (response: any) => {
+              const result = await verifyRazorpay({
+                data: {
+                  orderId: order.orderId,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                },
+              });
+              if (!result.ok) {
+                reject(new Error("Payment verification failed."));
+                return;
+              }
+              resolve();
+            },
+            prefill: {
+              name: form.customer_name,
+              email: form.email || undefined,
+              contact: form.phone,
+            },
+            modal: {
+              ondismiss: () => reject(new Error("Payment was cancelled.")),
+            },
+          });
+          checkout.open();
+        }).catch(async (error) => {
+          await failRazorpay({
+            data: {
+              orderId: order.orderId,
+              razorpay_order_id: razorpayOrder.razorpayOrderId,
+              reason: error instanceof Error ? error.message : "Razorpay payment failed",
+            },
+          });
+          throw error;
+        });
+        trackAnalyticsEvent({
+          eventType: "order_placed",
+          userId: user?.id,
+          metadata: { method: "razorpay", total: order.total },
+        });
+        clear();
+        navigate({ to: "/order-success", search: { method: "razorpay", order: order.orderId, status: "paid" } });
+        return;
+      }
+
+      if (!["upi", "bank_transfer"].includes(method)) throw new Error("Selected payment method is unavailable.");
       if (!upiOrder) {
-        const order = await saveOrder("upi");
+        const order = await saveOrder(method);
         trackAnalyticsEvent({
           eventType: "payment_started",
           userId: user?.id,
-          metadata: { method: "upi", total: order.total },
+          metadata: { method, total: order.total },
         });
         setUpiOrder(order);
         setNow(Date.now());
         setExpired(false);
-        toast.success("Order created. Complete the UPI payment and enter your UTR.");
+        toast.success("Order created. Complete the payment and enter your reference.");
         setBusy(false);
         return;
       }
@@ -329,6 +472,7 @@ function Checkout() {
       await submitUpiPayment({
         data: {
           orderId: upiOrder.orderId,
+          method: method === "bank_transfer" ? "bank_transfer" : "upi",
           payment_utr: utr,
           payment_screenshot_url: screenshotUrl,
         },
@@ -336,18 +480,18 @@ function Checkout() {
       trackAnalyticsEvent({
         eventType: "payment_submitted",
         userId: user?.id,
-        metadata: { method: "upi", total: upiOrder.total },
+        metadata: { method, total: upiOrder.total },
       });
       trackAnalyticsEvent({
         eventType: "order_placed",
         userId: user?.id,
-        metadata: { method: "upi", total: upiOrder.total },
+        metadata: { method, total: upiOrder.total },
       });
       clear();
       navigate({
         to: "/order-success",
         search: {
-          method: "upi",
+          method,
           order: upiOrder.orderId,
           amount: upiOrder.total.toFixed(2),
           status: "under_review",
@@ -370,7 +514,7 @@ function Checkout() {
       if (!file.type.startsWith("image/")) throw new Error("Please upload an image file.");
       if (file.size > 5 * 1024 * 1024) throw new Error("Image must be 5MB or smaller.");
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `upi/${upiOrder.orderId}/${crypto.randomUUID()}.${ext}`;
+      const path = `${method}/${upiOrder.orderId}/${crypto.randomUUID()}.${ext}`;
       const { error } = await supabase.storage
         .from("payment-screenshots")
         .upload(path, file, { cacheControl: "31536000", upsert: false });
@@ -544,32 +688,57 @@ function Checkout() {
                   </span>
                 </button>
               )}
-              {upiEnabled && (
+              {availablePaymentMethods.map((paymentMethod) => {
+                const reason = disabledReason(paymentMethod);
+                const disabled = Boolean(reason);
+                return (
                 <button
+                  key={paymentMethod.method_key}
                   type="button"
-                  onClick={() => setMethod("upi")}
+                  disabled={disabled}
+                  onClick={() => setMethod(paymentMethod.method_key as typeof method)}
                   className={
-                    "flex items-start gap-3 rounded-md border p-4 text-left transition-colors " +
-                    (method === "upi" ? "border-primary bg-primary/5" : "border-border")
+                    "flex items-start gap-3 rounded-md border p-4 text-left transition-colors disabled:opacity-60 " +
+                    (method === paymentMethod.method_key ? "border-primary bg-primary/5" : "border-border")
                   }
                 >
-                  <Smartphone size={20} className="mt-0.5 shrink-0" />
+                  {paymentIcon(paymentMethod.method_key)}
                   <span>
-                    <span className="block text-sm font-medium">Manual UPI payment</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      Scan QR or open your UPI app, then enter the UTR.
+                    <span className="block text-sm font-medium">
+                      {paymentMethod.display_name}
+                      {paymentMethod.recommended && <span className="ml-2 text-xs text-primary">Recommended</span>}
                     </span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {paymentMethod.description}
+                    </span>
+                    {paymentMethod.extra_fee > 0 && (
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Fee: {inr(Number(paymentMethod.extra_fee))}
+                      </span>
+                    )}
+                    {paymentMethod.verification_time && (
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {paymentMethod.verification_time}
+                      </span>
+                    )}
+                    {reason && <span className="mt-1 block text-xs text-destructive">{reason}</span>}
                   </span>
                 </button>
-              )}
+                );
+              })}
             </div>
-            {method === "upi" && upiOrder && (
+            {selectedPaymentMethod?.instructions && (
+              <p className="mt-3 rounded-sm bg-secondary/40 p-3 text-xs leading-5 text-muted-foreground">
+                {selectedPaymentMethod.instructions}
+              </p>
+            )}
+            {["upi", "bank_transfer"].includes(method) && upiOrder && (
               <div className="mt-5 rounded-sm border border-border bg-secondary/30 p-5">
                 {expired ? (
                   <div className="rounded-sm border border-destructive/30 bg-background p-4 text-sm">
                     <p className="font-medium text-destructive">Payment Expired</p>
                     <p className="mt-1 text-muted-foreground">
-                      This UPI payment window has expired and reserved stock was released.
+                      This payment window has expired and reserved stock was released.
                     </p>
                     <button
                       type="button"
@@ -582,32 +751,54 @@ function Checkout() {
                 ) : (
                   <>
                 <div className="grid gap-5 sm:grid-cols-[auto_1fr]">
-                  <div className="flex h-64 w-64 items-center justify-center rounded-sm bg-background p-3">
-                    {upiQr ? (
-                      <img src={upiQr} alt="UPI payment QR code" className="h-full w-full" />
-                    ) : (
-                      <Loader2 size={18} className="animate-spin text-muted-foreground" />
-                    )}
-                  </div>
+                  {method === "upi" && (
+                    <div className="flex h-64 w-64 items-center justify-center rounded-sm bg-background p-3">
+                      {upiQr ? (
+                        <img src={upiQr} alt="UPI payment QR code" className="h-full w-full" />
+                      ) : (
+                        <Loader2 size={18} className="animate-spin text-muted-foreground" />
+                      )}
+                    </div>
+                  )}
+                  {method === "bank_transfer" && (
+                    <div className="rounded-sm bg-background p-4 text-sm">
+                      <p className="font-medium">Bank details</p>
+                      {[
+                        ["Account name", bankDetails.account_name],
+                        ["Account number", bankDetails.account_number],
+                        ["IFSC", bankDetails.ifsc],
+                        ["Bank", bankDetails.bank_name],
+                        ["Branch", bankDetails.branch],
+                      ].filter(([, value]) => value).map(([label, value]) => (
+                        <p key={label} className="mt-2 text-muted-foreground">
+                          <span className="text-foreground">{label}:</span> {String(value)}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                   <div className="space-y-3 text-sm">
                     <p className="font-medium">Pay exactly {inr(upiOrder.total)}</p>
                     <p className="text-muted-foreground">Order number: {upiOrder.orderId}</p>
-                    <p className="text-muted-foreground">UPI ID: {upiId}</p>
+                    {method === "upi" && <p className="text-muted-foreground">UPI ID: {upiId}</p>}
                     <p className="text-muted-foreground">Payment expires in {remainingLabel}</p>
-                    <a
-                      href={upiIntent}
-                      className="inline-flex rounded-full bg-primary px-5 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground"
-                    >
-                      Pay using any UPI App
-                    </a>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => copyText(upiId, "UPI ID")}
-                        className="rounded-full border border-border px-3 py-1.5 text-xs"
+                    {method === "upi" && (
+                      <a
+                        href={upiIntent}
+                        className="inline-flex rounded-full bg-primary px-5 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground"
                       >
-                        Copy UPI ID
-                      </button>
+                        Pay using any UPI App
+                      </a>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {method === "upi" && (
+                        <button
+                          type="button"
+                          onClick={() => copyText(upiId, "UPI ID")}
+                          className="rounded-full border border-border px-3 py-1.5 text-xs"
+                        >
+                          Copy UPI ID
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => copyText(upiOrder.total.toFixed(2), "Amount")}
@@ -616,7 +807,7 @@ function Checkout() {
                         Copy Amount
                       </button>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    {method === "upi" && <div className="flex flex-wrap gap-2">
                       {[
                         ["PhonePe", upiIntent],
                         ["Google Pay", upiIntent],
@@ -631,7 +822,7 @@ function Checkout() {
                           Open {label}
                         </a>
                       ))}
-                    </div>
+                    </div>}
                   </div>
                 </div>
                 <div className="mt-4 rounded-sm bg-background/70 p-3 text-xs leading-relaxed text-muted-foreground">
@@ -732,6 +923,12 @@ function Checkout() {
                 <span>{inr(tax)}</span>
               </div>
             )}
+            {paymentFee > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Payment fee</span>
+                <span>{inr(paymentFee)}</span>
+              </div>
+            )}
             {couponDiscount > 0 && (
               <div className="flex justify-between text-primary">
                 <span>Discount</span>
@@ -749,13 +946,7 @@ function Checkout() {
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-xs uppercase tracking-[0.22em] text-primary-foreground disabled:opacity-60"
           >
             {busy && <Loader2 size={15} className="animate-spin" />}
-            {method === "whatsapp"
-              ? "Place order on WhatsApp"
-              : upiOrder
-                ? expired
-                  ? "Payment expired"
-                  : "Submit UPI reference"
-                : `Generate UPI payment for ${inr(total)}`}
+            {submitLabel}
           </button>
           <p className="mt-3 text-center text-xs text-muted-foreground">
             Server will verify stock and calculate the final total before creating your order.

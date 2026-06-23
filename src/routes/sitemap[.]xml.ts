@@ -45,6 +45,16 @@ export const Route = createFileRoute("/sitemap.xml")({
           for (const p of data ?? []) {
             entries.push({ path: `/product/${p.slug}`, changefreq: "weekly", priority: "0.8" });
           }
+          const { data: posts } = await supabase
+            .from("blog_posts")
+            .select("slug")
+            .eq("status", "published");
+          if ((posts ?? []).length > 0) {
+            entries.push({ path: "/blog", changefreq: "weekly", priority: "0.6" });
+          }
+          for (const post of posts ?? []) {
+            entries.push({ path: `/blog/${post.slug}`, changefreq: "monthly", priority: "0.5" });
+          }
         } catch {
           /* ignore — still emit static routes */
         }

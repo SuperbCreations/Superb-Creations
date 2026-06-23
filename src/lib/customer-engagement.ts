@@ -288,6 +288,9 @@ export function useLoyalty(userId: string | undefined) {
       return {
         points: points?.points ?? 0,
         lifetime_points: points?.lifetime_points ?? 0,
+        pending_points: points?.pending_points ?? 0,
+        redeemed_points: points?.redeemed_points ?? 0,
+        expired_points: points?.expired_points ?? 0,
         enabled: points?.enabled ?? true,
         loyalty_point_events: events ?? [],
       };

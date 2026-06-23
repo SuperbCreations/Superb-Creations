@@ -37,6 +37,14 @@ RAZORPAY_KEY_SECRET="your-razorpay-key-secret"
 RAZORPAY_WEBHOOK_SECRET="your-razorpay-webhook-secret"
 ```
 
+Production hardening:
+
+```bash
+CRON_SECRET="replace-with-long-random-cron-secret"
+BREVO_WEBHOOK_TOKEN="optional-brevo-webhook-token"
+SHIPPING_WEBHOOK_TOKEN="optional-shipping-webhook-token"
+```
+
 Brevo email:
 
 ```bash
@@ -61,6 +69,7 @@ The migrations create the public tables, RLS policies, stock/payment RPCs, Razor
 
 ## Production Checklist
 
+- Review the Phase 10 checklist in `docs/production-readiness.md` before launch and before major restores.
 - Admin access is intentionally limited to `superbcreations55@gmail.com`. Do not add client-side role assignment, signup metadata role checks, or public APIs that can grant admin.
 - Apply all Supabase migrations before launch. The latest migrations revoke public order inserts, force owner-email admin checks, create `product-images`, and restrict product/order/review/storage writes with RLS.
 - Confirm the owner can sign in with `superbcreations55@gmail.com` before adding products.
