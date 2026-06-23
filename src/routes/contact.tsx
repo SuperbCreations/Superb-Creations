@@ -67,8 +67,8 @@ function Contact() {
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <Mail size={16} />
             </span>
-            <a href="mailto:superbconnections55@gmail.com" className="hover:underline">
-              superbconnections55@gmail.com
+            <a href="mailto:superbcreations55@gmail.com" className="hover:underline">
+              superbcreations55@gmail.com
             </a>
           </li>
           <li className="flex items-center gap-4">
