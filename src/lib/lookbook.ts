@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { publicSupabase } from "@/integrations/supabase/public-client";
 
 export type LookbookItem = {
   id: string;
@@ -13,7 +13,7 @@ export type LookbookItem = {
 };
 
 export async function fetchActiveLookbookItems(): Promise<LookbookItem[]> {
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from("lookbook_items")
     .select("*")
     .eq("active", true)

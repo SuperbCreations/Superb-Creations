@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { publicSupabase } from "@/integrations/supabase/public-client";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+const publicDb = publicSupabase as any;
 const db = supabase as any;
 
 export type Review = {
@@ -25,7 +27,7 @@ export function useReviews(productId: string | undefined) {
     queryKey: ["reviews", productId],
     enabled: !!productId,
     queryFn: async (): Promise<Review[]> => {
-      const { data, error } = await db
+      const { data, error } = await publicDb
         .from("reviews")
         .select("*")
         .eq("product_id", productId!)
@@ -41,7 +43,7 @@ export function useAllProductRatings() {
   return useQuery({
     queryKey: ["ratings-summary"],
     queryFn: async () => {
-      const { data, error } = await db
+      const { data, error } = await publicDb
         .from("reviews")
         .select("product_id, rating")
         .eq("approved", true);

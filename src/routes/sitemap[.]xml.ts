@@ -29,10 +29,17 @@ export const Route = createFileRoute("/sitemap.xml")({
         ];
 
         try {
+          // Sitemap is a public read path; this server-created client has no user JWT.
           const supabase = createClient(
             process.env.SUPABASE_URL!,
             process.env.SUPABASE_PUBLISHABLE_KEY!,
-            { auth: { persistSession: false, autoRefreshToken: false } },
+            {
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+                detectSessionInUrl: false,
+              },
+            },
           );
           const { data } = await supabase.from("products").select("slug").eq("active", true);
           for (const p of data ?? []) {

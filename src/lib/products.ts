@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { publicSupabase } from "@/integrations/supabase/public-client";
 
 export type Product = {
   id: string;
@@ -68,7 +68,7 @@ export const CATEGORIES = [
 export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 async function fetchProducts(): Promise<Product[]> {
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from("products")
     .select("*")
     .eq("active", true)
@@ -86,7 +86,7 @@ export function useProduct(slug: string) {
   return useQuery({
     queryKey: ["product", slug],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await publicSupabase
         .from("products")
         .select("*")
         .eq("slug", slug)
@@ -103,7 +103,7 @@ export function useVariants(productId: string | undefined) {
     queryKey: ["variants", productId],
     enabled: !!productId,
     queryFn: async (): Promise<Variant[]> => {
-      const { data, error } = await supabase
+      const { data, error } = await publicSupabase
         .from("product_variants")
         .select("*")
         .eq("product_id", productId!)
@@ -119,7 +119,7 @@ export function useAllVariants() {
   return useQuery({
     queryKey: ["all-variants"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await publicSupabase
         .from("product_variants")
         .select("*")
         .order("sort_order");

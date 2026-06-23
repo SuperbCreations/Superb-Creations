@@ -5,7 +5,10 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  publicSupabase,
+  publicSupabaseProjectRef,
+} from "@/integrations/supabase/public-client";
 import { useAuth } from "@/lib/auth";
 
 export const DEFAULT_BUSINESS_SETTINGS = {
@@ -157,7 +160,7 @@ type BusinessSettingsContextValue = {
 
 const BusinessSettingsContext = createContext<BusinessSettingsContextValue | null>(null);
 
-export function supabaseProjectRefFromUrl(url = supabase.supabaseUrl) {
+export function supabaseProjectRefFromUrl(url = publicSupabase.supabaseUrl) {
   try {
     return new URL(url).hostname.split(".")[0] || "";
   } catch {
@@ -167,8 +170,8 @@ export function supabaseProjectRefFromUrl(url = supabase.supabaseUrl) {
 
 function publicEnvDiagnostics() {
   return {
-    supabaseUrl: supabase.supabaseUrl,
-    supabaseProjectRef: supabaseProjectRefFromUrl(),
+    supabaseUrl: publicSupabase.supabaseUrl,
+    supabaseProjectRef: publicSupabaseProjectRef(),
     vercelCommitSha: import.meta.env.VERCEL_GIT_COMMIT_SHA || "",
     vercelUrl: import.meta.env.VERCEL_URL || "",
   };
@@ -176,7 +179,9 @@ function publicEnvDiagnostics() {
 
 export async function fetchBusinessSettings(): Promise<BusinessSettings> {
   try {
-    const { data, error } = await supabase.from("business_settings").select("key,value");
+    const { data, error } = await publicSupabase
+      .from("business_settings")
+      .select("key,value");
     if (error) {
       console.warn("[business-settings] Falling back to bundled public defaults", error.message);
       return { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings;
