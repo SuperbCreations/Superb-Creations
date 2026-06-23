@@ -11,7 +11,7 @@ export function ProductCard({ product }: { product: Product }) {
   const { addItem, setOpen } = useCart();
   const { user } = useAuth();
   const { data: ratings } = useAllProductRatings();
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const { data: wishlist = [] } = useWishlist(user?.id);
   const toggleWishlist = useToggleWishlist(user?.id);
   const rating = ratings?.[product.id];

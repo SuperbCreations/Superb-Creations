@@ -26,22 +26,21 @@ export const Route = createFileRoute("/contact")({
 });
 
 function Contact() {
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const storeName = settings?.store_name || "Superb Creations";
-  const canWhatsapp = settings && settingBool(settings, "enable_whatsapp");
+  const storeName = settings.store_name;
+  const canWhatsapp = settingBool(settings, "enable_whatsapp");
   const addressText = [
-    settings?.address,
-    settings?.city,
-    settings?.state,
-    settings?.country,
+    settings.address,
+    settings.city,
+    settings.state,
+    settings.country,
   ]
     .filter(Boolean)
     .join(" · ");
-  const hoursText = settings?.business_hours || "Mon-Sat, 10am-7pm";
-  const locationText = [addressText, hoursText].filter(Boolean).join(" · ");
+  const hoursText = settings.business_hours;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,15 +90,18 @@ function Contact() {
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <Mail size={16} />
             </span>
-            <a href={`mailto:${settings?.contact_email || "superbcreations55@gmail.com"}`} className="hover:underline">
-              {settings?.contact_email || "superbcreations55@gmail.com"}
+            <a href={`mailto:${settings.contact_email}`} className="hover:underline">
+              {settings.contact_email}
             </a>
           </li>
           <li className="flex items-center gap-4">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <MapPin size={16} />
             </span>
-            <span>{locationText}</span>
+            <span>
+              {addressText && <span className="block">{addressText}</span>}
+              {hoursText && <span className="block">{hoursText}</span>}
+            </span>
           </li>
         </ul>
 

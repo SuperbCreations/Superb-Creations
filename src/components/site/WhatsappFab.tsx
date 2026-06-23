@@ -2,7 +2,7 @@ import { MessageCircle } from "lucide-react";
 import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
 
 export function WhatsappFab() {
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   if (!settings || !settingBool(settings, "enable_whatsapp")) return null;
 
   return (

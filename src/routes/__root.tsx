@@ -18,7 +18,11 @@ import { WhatsappFab } from "@/components/site/WhatsappFab";
 import { CartSheet } from "@/components/site/CartSheet";
 import { CartProvider } from "@/lib/cart";
 import { AuthProvider, useAuth } from "@/lib/auth";
-import { settingBool, useBusinessSettings } from "@/lib/business-settings";
+import {
+  BusinessSettingsProvider,
+  settingBool,
+  useBusinessSettings,
+} from "@/lib/business-settings";
 import { usePageAnalytics } from "@/lib/analytics";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -136,10 +140,12 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <CartProvider>
-          <SiteFrame />
-          <Toaster position="top-center" />
-        </CartProvider>
+        <BusinessSettingsProvider>
+          <CartProvider>
+            <SiteFrame />
+            <Toaster position="top-center" />
+          </CartProvider>
+        </BusinessSettingsProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
@@ -148,8 +154,8 @@ function RootComponent() {
 function SiteFrame() {
   const { isAdmin, user } = useAuth();
   const location = useLocation();
-  const { data: settings } = useBusinessSettings();
-  const maintenance = settings && settingBool(settings, "maintenance_mode") && !isAdmin;
+  const { settings } = useBusinessSettings();
+  const maintenance = settingBool(settings, "maintenance_mode") && !isAdmin;
   usePageAnalytics(user?.id, location.pathname);
 
   if (maintenance) {

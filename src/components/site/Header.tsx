@@ -20,9 +20,9 @@ export function Header() {
   const { count, setOpen: setCartOpen } = useCart();
   const { user, isAdmin } = useAuth();
   const { data: wishlist = [] } = useWishlist(user && !isAdmin ? user.id : undefined);
-  const { data: settings } = useBusinessSettings();
-  const logoSrc = settings?.logo_url || logo;
-  const storeName = settings?.store_name || "Superb Creations";
+  const { settings } = useBusinessSettings();
+  const logoSrc = settings.logo_url || logo;
+  const storeName = settings.store_name;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">

@@ -30,7 +30,7 @@ export const Route = createFileRoute("/_authenticated/account")({
 
 function AccountPage() {
   const { user, signOut } = useAuth();
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const { addItem, setOpen: setCartOpen } = useCart();
   const [tab, setTab] = useState("profile");
   const { data: profile } = useCustomerProfile(user?.id);
@@ -635,9 +635,9 @@ function printCustomerInvoice(order: any, settings: any) {
   win.document.write(`<!doctype html><html><head><title>Invoice ${order.order_number || order.id}</title>
     <style>body{font-family:Arial,sans-serif;padding:32px;color:#222} table{width:100%;border-collapse:collapse;margin-top:20px} td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}.right{text-align:right}.muted{color:#666;font-size:12px}</style>
     </head><body>
-    ${settings?.logo_url ? `<img src="${settings.logo_url}" style="max-height:80px;max-width:220px"/>` : ""}
+    ${settings.logo_url ? `<img src="${settings.logo_url}" style="max-height:80px;max-width:220px"/>` : ""}
     <h1>Invoice</h1>
-    <p class="muted">${settings?.business_name || "Superb Creations"}<br/>${settings?.address || ""}<br/>${settings?.contact_email || ""}</p>
+    <p class="muted">${settings.business_name}<br/>${settings.address}<br/>${settings.contact_email}</p>
     <h2>${order.order_number || order.id}</h2>
     <p><strong>Customer:</strong> ${order.customer_name}<br/><strong>Phone:</strong> ${order.phone}<br/><strong>Address:</strong> ${order.address}</p>
     <table><thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table>

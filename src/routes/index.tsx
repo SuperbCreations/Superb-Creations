@@ -30,35 +30,34 @@ export const Route = createFileRoute("/")({
 function Home() {
   const { data: products = [] } = useProducts();
   const { data: lookbookItems = [] } = useLookbookItems();
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const featured = products.slice(0, 4);
   const lookbookPreview = lookbookItems[0];
-  const heroImage = settings?.homepage_banner_url || heroImg;
-  const canWhatsapp = settings && settingBool(settings, "enable_whatsapp");
-  const freeShipping = settings?.free_shipping_threshold || "2500";
+  const heroImage = settings.homepage_banner_url || heroImg;
+  const canWhatsapp = settingBool(settings, "enable_whatsapp");
+  const freeShipping = settings.free_shipping_threshold;
 
   return (
     <>
       <section className="relative overflow-hidden bg-blush">
         <div className="container-boutique grid items-center gap-10 py-12 md:grid-cols-[1.05fr_1fr] md:gap-16 md:py-20">
           <div className="fade-up max-w-xl">
-            <p className="eyebrow">{settings?.hero_eyebrow || "New season · Spring edit"}</p>
+            <p className="eyebrow">{settings.hero_eyebrow}</p>
             <h1 className="mt-4 font-display text-5xl leading-[1.02] tracking-tight text-foreground md:text-7xl">
-              {settings?.hero_title || "Quietly elegant."}<br />
+              {settings.hero_title}<br />
               <span className="italic text-foreground/80">
-                {settings?.hero_subtitle || "Made for every day."}
+                {settings.hero_subtitle}
               </span>
             </h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
-              {settings?.hero_description ||
-                "Hand-finished kurta sets, flowy silhouettes and timeless drapes — designed in soft pastels for the modern Indian wardrobe."}
+              {settings.hero_description}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <a
-                href={settings?.hero_button_link || "/shop"}
+                href={settings.hero_button_link}
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-xs uppercase tracking-[0.22em] text-primary-foreground transition-opacity hover:opacity-90"
               >
-                {settings?.hero_button_text || "Shop the edit"} <ArrowRight size={14} />
+                {settings.hero_button_text} <ArrowRight size={14} />
               </a>
               {canWhatsapp && (
                 <a
@@ -80,7 +79,7 @@ function Home() {
             <div className="hover-zoom aspect-[3/4] overflow-hidden rounded-sm shadow-soft">
               <img
                 src={heroImage}
-                alt={`${settings?.store_name || "Superb Creations"} homepage banner`}
+                alt={`${settings.store_name} homepage banner`}
                 width={1600}
                 height={1920}
                 className="h-full w-full object-cover"
@@ -92,13 +91,13 @@ function Home() {
 
         <div
           className="overflow-hidden border-y border-primary/10 bg-background/40 py-4"
-          style={settings?.announcement_color ? { backgroundColor: settings.announcement_color } : undefined}
+          style={settings.announcement_color ? { backgroundColor: settings.announcement_color } : undefined}
         >
           <div className="marquee text-sm uppercase tracking-[0.32em] text-foreground/70">
             {Array.from({ length: 2 }).map((_, i) => (
               <div key={i} className="flex shrink-0 gap-12">
-                {(settings?.announcement_bar ||
-                  `Free shipping over ₹${freeShipping} ✦ Order on WhatsApp · ${settings?.phone_number || "+91 70062 02496"} ✦ Handcrafted in India ✦ New drops every Friday`)
+                {(settings.announcement_bar ||
+                  `Free shipping over ₹${freeShipping} ✦ Order on WhatsApp · ${settings.phone_number} ✦ Handcrafted in India ✦ New drops every Friday`)
                   .split("✦")
                   .map((part, partIndex) => (
                     <span key={`${i}-${partIndex}`}>
@@ -117,9 +116,9 @@ function Home() {
           <div>
             <p className="eyebrow">The Edit</p>
             <h2 className="mt-2 font-display text-4xl md:text-5xl">
-              {settings?.featured_collection_title || "Pieces we love right now"}
+              {settings.featured_collection_title}
             </h2>
-            {settings?.featured_collection_description && (
+            {settings.featured_collection_description && (
               <p className="mt-2 max-w-xl text-sm text-muted-foreground">
                 {settings.featured_collection_description}
               </p>
@@ -200,11 +199,10 @@ function Home() {
           <div className="order-1 md:order-2 md:pl-8">
             <p className="eyebrow">Lookbook · Vol. 01</p>
             <h2 className="mt-3 font-display text-4xl md:text-5xl">
-              {settings?.lookbook_title || "An ode to soft mornings."}
+              {settings.lookbook_title}
             </h2>
             <p className="mt-5 max-w-md text-muted-foreground">
-              {settings?.lookbook_description ||
-                "Our spring lookbook celebrates ease — the kind of pieces you pull on without thinking, that quietly turn heads anyway."}
+              {settings.lookbook_description}
             </p>
             <Link
               to="/lookbook"

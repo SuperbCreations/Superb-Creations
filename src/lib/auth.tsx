@@ -5,10 +5,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
+const BUSINESS_SETTINGS_QUERY_KEY = ["business-settings"] as const;
 
 type AuthContextValue = {
   user: User | null;
@@ -21,6 +23,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -30,10 +33,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const resolveRole = (email: string | undefined) => {
       setIsAdmin(email?.toLowerCase() === OWNER_ADMIN_EMAIL);
     };
+    const resetBusinessSettings = () => {
+      queryClient.removeQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
+    };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess);
       setUser(sess?.user ?? null);
+      resetBusinessSettings();
       // Defer Supabase calls to avoid deadlocks inside the callback.
       setTimeout(() => {
         resolveRole(sess?.user?.email);
@@ -48,13 +56,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => sub.subscription.unsubscribe();
-  }, []);
+  }, [queryClient]);
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
     setUser(null);
     setIsAdmin(false);
+    queryClient.removeQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
+    queryClient.invalidateQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
     if (typeof window !== "undefined" && window.location.pathname !== "/") {
       window.location.assign("/");
     }

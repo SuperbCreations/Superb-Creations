@@ -34,6 +34,7 @@ import type { LookbookItem } from "@/lib/lookbook";
 import {
   DEFAULT_BUSINESS_SETTINGS,
   businessSettingRows,
+  supabaseProjectRefFromUrl,
   useBusinessSettings,
   type BusinessSettings,
 } from "@/lib/business-settings";
@@ -1000,6 +1001,7 @@ function LookbookAdmin() {
 function SettingsAdmin() {
   const qc = useQueryClient();
   const { session, user } = useAuth();
+  const { settings: liveSettings } = useBusinessSettings();
   const sendBrevoTestEmailFn = useServerFn(sendBrevoTestEmail);
   const checkBrevoConnectionFn = useServerFn(checkBrevoConnection);
   const sendNewsletterCampaignFn = useServerFn(sendNewsletterCampaign);
@@ -1099,6 +1101,7 @@ function SettingsAdmin() {
       </div>
 
       <div className="rounded-sm border border-border p-5">
+        <SettingsDebugPanel settings={liveSettings} />
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-2xl">{section.label}</h2>
@@ -1175,6 +1178,32 @@ function SettingsAdmin() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SettingsDebugPanel({ settings }: { settings: BusinessSettings }) {
+  const rows: Array<[string, string]> = [
+    ["contact_email", settings.contact_email],
+    ["facebook_url", settings.facebook_url],
+    ["show_facebook", settings.show_facebook],
+    ["logo_url", settings.logo_url],
+    ["address", settings.address],
+    ["business_hours", settings.business_hours],
+    ["supabase_project_ref", supabaseProjectRefFromUrl()],
+  ];
+
+  return (
+    <div className="mb-5 rounded-sm border border-border bg-secondary/30 p-4">
+      <p className="eyebrow">Settings Debug</p>
+      <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt className="uppercase tracking-[0.18em] text-muted-foreground">{label}</dt>
+            <dd className="mt-1 break-words text-foreground">{value || "Not set"}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -2267,7 +2296,7 @@ function objectRows(value: Record<string, unknown> = {}) {
 function OrdersAdmin() {
   const qc = useQueryClient();
   const { session } = useAuth();
-  const { data: settings = DEFAULT_BUSINESS_SETTINGS } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const confirmManualOrderFn = useServerFn(confirmManualOrder);
   const rejectManualPaymentFn = useServerFn(rejectManualPayment);
   const updateOrderOperationsFn = useServerFn(updateOrderOperations);

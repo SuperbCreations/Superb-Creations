@@ -1,5 +1,12 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 
 export const DEFAULT_BUSINESS_SETTINGS = {
   store_name: "Superb Creations",
@@ -137,6 +144,35 @@ export const settingNumber = (settings: BusinessSettings, key: BusinessSettingKe
 };
 
 const SECRET_SETTING_PATTERN = /(api_key|secret|token|password|service_role|private)/i;
+export const BUSINESS_SETTINGS_QUERY_KEY = ["business-settings"] as const;
+
+type BusinessSettingsContextValue = {
+  settings: BusinessSettings;
+  data: BusinessSettings;
+  loading: boolean;
+  isLoading: boolean;
+  error: Error | null;
+  refreshSettings: () => Promise<void>;
+};
+
+const BusinessSettingsContext = createContext<BusinessSettingsContextValue | null>(null);
+
+export function supabaseProjectRefFromUrl(url = supabase.supabaseUrl) {
+  try {
+    return new URL(url).hostname.split(".")[0] || "";
+  } catch {
+    return "";
+  }
+}
+
+function publicEnvDiagnostics() {
+  return {
+    supabaseUrl: supabase.supabaseUrl,
+    supabaseProjectRef: supabaseProjectRefFromUrl(),
+    vercelCommitSha: import.meta.env.VERCEL_GIT_COMMIT_SHA || "",
+    vercelUrl: import.meta.env.VERCEL_URL || "",
+  };
+}
 
 export async function fetchBusinessSettings(): Promise<BusinessSettings> {
   try {
@@ -159,12 +195,70 @@ export async function fetchBusinessSettings(): Promise<BusinessSettings> {
   }
 }
 
-export function useBusinessSettings() {
-  return useQuery({
-    queryKey: ["business-settings"],
+export function BusinessSettingsProvider({ children }: { children: ReactNode }) {
+  const { user, isAdmin, loading: authLoading } = useAuth();
+  const query = useQuery({
+    queryKey: BUSINESS_SETTINGS_QUERY_KEY,
     queryFn: fetchBusinessSettings,
     staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
+  const settings = query.data ?? ({ ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings);
+  const error = query.error instanceof Error ? query.error : null;
+  const authState = authLoading ? "loading" : isAdmin ? "admin" : user ? "user" : "anon";
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const diagnostics = publicEnvDiagnostics();
+    console.info("[business-settings]", {
+      ...diagnostics,
+      authState,
+      contact_email: settings.contact_email,
+      facebook_url: settings.facebook_url,
+      logo_url: settings.logo_url,
+    });
+  }, [
+    authState,
+    settings.contact_email,
+    settings.facebook_url,
+    settings.logo_url,
+  ]);
+
+  useEffect(() => {
+    const { vercelCommitSha, vercelUrl } = publicEnvDiagnostics();
+    if (!vercelCommitSha && !vercelUrl) return;
+    console.info("[build-version]", {
+      vercelCommitSha,
+      vercelUrl,
+    });
+  }, []);
+
+  const refreshSettings = async () => {
+    await query.refetch();
+  };
+
+  return (
+    <BusinessSettingsContext.Provider
+      value={{
+        settings,
+        data: settings,
+        loading: query.isLoading,
+        isLoading: query.isLoading,
+        error,
+        refreshSettings,
+      }}
+    >
+      {children}
+    </BusinessSettingsContext.Provider>
+  );
+}
+
+export function useBusinessSettings() {
+  const ctx = useContext(BusinessSettingsContext);
+  if (!ctx) {
+    throw new Error("useBusinessSettings must be used within BusinessSettingsProvider");
+  }
+  return ctx;
 }
 
 export function businessSettingRows(settings: Partial<BusinessSettings>) {

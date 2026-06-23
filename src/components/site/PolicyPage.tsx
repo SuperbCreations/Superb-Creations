@@ -18,8 +18,8 @@ export function PolicyPage({
   sections: PolicySection[];
   settingKey?: BusinessSettingKey;
 }) {
-  const { data: settings } = useBusinessSettings();
-  const customPolicy = settingKey ? settings?.[settingKey]?.trim() : "";
+  const { settings } = useBusinessSettings();
+  const customPolicy = settingKey ? settings[settingKey].trim() : "";
   const visibleSections = customPolicy ? [{ title, body: customPolicy }] : sections;
 
   return (

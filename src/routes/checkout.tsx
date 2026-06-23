@@ -9,7 +9,6 @@ import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { inr } from "@/lib/products";
 import {
-  DEFAULT_BUSINESS_SETTINGS,
   settingBool,
   settingNumber,
   useBusinessSettings,
@@ -56,7 +55,7 @@ function Checkout() {
   const navigate = useNavigate();
   const { items, subtotal, clear } = useCart();
   const { user, session } = useAuth();
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const { data: addresses = [] } = useCustomerAddresses(user?.id);
   const validateCoupon = useValidateCoupon();
   const [form, setForm] = useState({ customer_name: "", phone: "", email: "", address: "" });
@@ -88,7 +87,7 @@ function Checkout() {
   const submitUpiPayment = useServerFn(submitUpiPaymentReference);
   const expireOrder = useServerFn(expireUpiOrder);
 
-  const checkoutSettings = settings || DEFAULT_BUSINESS_SETTINGS;
+  const checkoutSettings = settings;
   const checkoutEnabled = settingBool(checkoutSettings, "enable_checkout");
   const whatsappEnabled = settingBool(checkoutSettings, "enable_whatsapp");
   const upiEnabled = settingBool(checkoutSettings, "enable_upi");
@@ -168,7 +167,7 @@ function Checkout() {
   }, [items, pincode, quoteShipping, shippingMode, subtotal]);
 
   const businessName = checkoutSettings.business_name || "Superb Creations";
-  const upiId = checkoutSettings.upi_id || DEFAULT_BUSINESS_SETTINGS.upi_id;
+  const upiId = checkoutSettings.upi_id;
   const upiIntent = useMemo(() => {
     if (!upiOrder) return "";
     const params = new URLSearchParams({

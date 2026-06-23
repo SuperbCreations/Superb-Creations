@@ -41,7 +41,7 @@ function ProductPage() {
   const { data: product, isLoading } = useProduct(slug);
   const { data: all = [] } = useProducts();
   const { data: variants = [] } = useVariants(product?.id);
-  const { data: settings } = useBusinessSettings();
+  const { settings } = useBusinessSettings();
   const { addItem, setOpen } = useCart();
   const { user } = useAuth();
   const trackViewed = useTrackRecentlyViewed(user?.id);
