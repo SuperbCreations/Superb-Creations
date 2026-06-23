@@ -1,16 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2 } from "lucide-react";
+import { inr } from "@/lib/products";
 
 export const Route = createFileRoute("/order-success")({
   validateSearch: (search: Record<string, unknown>) => ({
-    method: search.method === "razorpay" ? "razorpay" : "whatsapp",
+    method:
+      search.method === "razorpay" || search.method === "upi" ? search.method : "whatsapp",
+    order: typeof search.order === "string" ? search.order : undefined,
+    amount: typeof search.amount === "string" ? Number(search.amount) : undefined,
+    status: typeof search.status === "string" ? search.status : undefined,
   }),
   head: () => ({ meta: [{ title: "Order placed — Superb Creations" }] }),
   component: OrderSuccess,
 });
 
 function OrderSuccess() {
-  const { method } = Route.useSearch();
+  const { method, order, amount, status } = Route.useSearch();
 
   return (
     <section className="container-boutique flex min-h-[60vh] flex-col items-center justify-center py-16 text-center">
@@ -19,8 +24,20 @@ function OrderSuccess() {
       <p className="mt-4 max-w-md text-muted-foreground">
         {method === "razorpay"
           ? "Your payment was successful and your order is confirmed. We'll be in touch shortly with delivery details."
-          : "Your order details have opened in WhatsApp. Send us the message to confirm — we'll reply with availability and payment details."}
+          : method === "upi"
+            ? "Your UPI payment reference has been submitted. We'll verify the payment and confirm your order shortly."
+            : "Your order details have opened in WhatsApp. Send us the message to confirm — we'll reply with availability and payment details."}
       </p>
+      {method === "upi" && (
+        <div className="mt-6 rounded-sm border border-border bg-secondary/30 p-4 text-sm">
+          {order && <p>Order number: {order}</p>}
+          {typeof amount === "number" && !Number.isNaN(amount) && <p>Amount: {inr(amount)}</p>}
+          <p>Payment status: {status === "under_review" ? "Under Review" : "Payment Submitted"}</p>
+          <p className="mt-2 text-muted-foreground">
+            Your invoice will be available after payment approval.
+          </p>
+        </div>
+      )}
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         <Link
           to="/shop"

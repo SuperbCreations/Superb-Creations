@@ -13,7 +13,23 @@ export type Product = {
   description: string;
   in_stock: boolean;
   stock: number;
+  reserved_stock?: number;
+  sold_stock?: number;
+  damaged_stock?: number;
+  returned_stock?: number;
+  archived_stock?: number;
+  lifetime_sales?: number;
+  low_stock_threshold?: number;
+  product_status?: string;
   sort_order: number;
+  weight_grams?: number;
+  length_cm?: number;
+  width_cm?: number;
+  height_cm?: number;
+  fragile?: boolean;
+  special_packaging?: boolean;
+  shipping_class?: string;
+  free_shipping_eligible?: boolean;
 };
 
 export type Variant = {
@@ -24,6 +40,11 @@ export type Variant = {
   color_hex: string | null;
   price: number | null;
   stock: number;
+  reserved_stock?: number;
+  sold_stock?: number;
+  damaged_stock?: number;
+  returned_stock?: number;
+  low_stock_threshold?: number;
   sku: string | null;
   sort_order: number;
 };
@@ -44,17 +65,7 @@ export const CATEGORIES = [
   "Cosmetics",
 ] as const;
 
-export const WHATSAPP_NUMBER = "917006202496";
-
 export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
-export const whatsappLink = (message: string) =>
-  `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-
-export const whatsappOrderLink = (product: Pick<Product, "name" | "price">) =>
-  whatsappLink(
-    `Hi Superb Creations! I'd like to order:\n\n• ${product.name}\n• Price: ${inr(product.price)}\n\nPlease share availability and sizes.`,
-  );
 
 async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await supabase
@@ -98,6 +109,20 @@ export function useVariants(productId: string | undefined) {
         .eq("product_id", productId!)
         .order("sort_order")
         .order("size");
+      if (error) throw error;
+      return (data ?? []) as Variant[];
+    },
+  });
+}
+
+export function useAllVariants() {
+  return useQuery({
+    queryKey: ["all-variants"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_variants")
+        .select("*")
+        .order("sort_order");
       if (error) throw error;
       return (data ?? []) as Variant[];
     },

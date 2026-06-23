@@ -16,6 +16,7 @@ export const Route = createFileRoute("/support-policy")({
       eyebrow="Policy"
       title="Contact & Support Policy"
       updated="June 22, 2026"
+      settingKey="support_policy"
       sections={[
         {
           title: "Support channels",

@@ -16,6 +16,7 @@ export const Route = createFileRoute("/privacy-policy")({
       eyebrow="Policy"
       title="Privacy Policy"
       updated="June 22, 2026"
+      settingKey="privacy_policy"
       sections={[
         {
           title: "Information we collect",
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/privacy-policy")({
         },
         {
           title: "Service providers",
-          body: "We use Supabase for application data, Razorpay for payments, Vercel for hosting and Resend for email notifications. These providers process data only as needed to provide their services.",
+          body: "We use Supabase for application data, Razorpay for payments, Vercel for hosting and Brevo for email notifications. These providers process data only as needed to provide their services.",
         },
         {
           title: "Retention and requests",

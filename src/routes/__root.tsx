@@ -3,6 +3,7 @@ import {
   Outlet,
   Link,
   createRootRouteWithContext,
+  useLocation,
   useRouter,
   HeadContent,
   Scripts,
@@ -16,7 +17,9 @@ import { Footer } from "@/components/site/Footer";
 import { WhatsappFab } from "@/components/site/WhatsappFab";
 import { CartSheet } from "@/components/site/CartSheet";
 import { CartProvider } from "@/lib/cart";
-import { AuthProvider } from "@/lib/auth";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { settingBool, useBusinessSettings } from "@/lib/business-settings";
+import { usePageAnalytics } from "@/lib/analytics";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -134,16 +137,44 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <CartProvider>
-          <Header />
-          <main>
-            <Outlet />
-          </main>
-          <Footer />
-          <WhatsappFab />
-          <CartSheet />
+          <SiteFrame />
           <Toaster position="top-center" />
         </CartProvider>
       </AuthProvider>
     </QueryClientProvider>
+  );
+}
+
+function SiteFrame() {
+  const { isAdmin, user } = useAuth();
+  const location = useLocation();
+  const { data: settings } = useBusinessSettings();
+  const maintenance = settings && settingBool(settings, "maintenance_mode") && !isAdmin;
+  usePageAnalytics(user?.id, location.pathname);
+
+  if (maintenance) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-4 text-center">
+        <div className="max-w-md">
+          <p className="eyebrow">{settings.store_name}</p>
+          <h1 className="mt-3 font-display text-4xl">Store is temporarily paused</h1>
+          <p className="mt-4 text-sm leading-6 text-muted-foreground">
+            {settings.maintenance_message}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <Header />
+      <main>
+        <Outlet />
+      </main>
+      <Footer />
+      <WhatsappFab />
+      <CartSheet />
+    </>
   );
 }

@@ -16,6 +16,7 @@ export const Route = createFileRoute("/shipping-policy")({
       eyebrow="Policy"
       title="Shipping Policy"
       updated="June 22, 2026"
+      settingKey="shipping_policy"
       sections={[
         {
           title: "Delivery area",

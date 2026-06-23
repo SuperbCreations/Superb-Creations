@@ -2,15 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 /**
- * Email notifications via Resend (https://resend.com).
+ * Email notifications via Brevo.
  *
- * Required env vars (set via Lovable Cloud secrets — never hardcode):
- *   RESEND_API_KEY      — API key from Resend dashboard
- *   RESEND_FROM         — "Name <email@yourdomain>" from a verified Resend
- *                         domain. If omitted, email is skipped with a clear
- *                         server log so API keys never need to reach the client.
- *   ADMIN_EMAIL         — (optional) recipient for admin order notifications,
- *                         defaults to superbcreations55@gmail.com.
+ * Brevo configuration is stored in owner-only Business Settings. The API key
+ * is read only from server code using the Supabase service role and is redacted
+ * from public settings reads.
  */
 
 const ADMIN_DEFAULT = "superbcreations55@gmail.com";
@@ -24,49 +20,290 @@ type ItemLine = {
 
 const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-async function sendResend(args: {
+type EmailSettings = {
+  storeName: string;
+  contactEmail: string;
+  supportEmail: string;
+  businessEmail: string;
+  phoneNumber: string;
+  senderName: string;
+  senderEmail: string;
+  replyToEmail: string;
+  companyAddress: string;
+  emailLogoUrl: string;
+  emailFooter: string;
+  emailPrimaryColor: string;
+  emailSecondaryColor: string;
+  enableEmailSending: boolean;
+  brevoApiKey: string;
+  brevoContactsEnabled: boolean;
+  instagramUrl: string;
+  facebookUrl: string;
+  youtubeUrl: string;
+};
+
+async function loadEmailSettings(): Promise<EmailSettings> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("business_settings")
+      .select("key,value")
+      .in("key", [
+        "store_name",
+        "contact_email",
+        "support_email",
+        "business_email",
+        "phone_number",
+        "email_sender_name",
+        "email_sender_email",
+        "email_reply_to",
+        "email_company_address",
+        "email_logo_url",
+        "email_footer",
+        "email_primary_color",
+        "email_secondary_color",
+        "enable_email_sending",
+        "brevo_api_key",
+        "brevo_contacts_enabled",
+        "instagram_url",
+        "facebook_url",
+        "youtube_url",
+      ]);
+    if (error) throw error;
+    const rows = new Map<string, string>((data ?? []).map((row: any) => [row.key, row.value]));
+    return {
+      storeName: rows.get("store_name") || "Superb Creations",
+      contactEmail: rows.get("contact_email") || ADMIN_DEFAULT,
+      supportEmail: rows.get("support_email") || rows.get("contact_email") || ADMIN_DEFAULT,
+      businessEmail: rows.get("business_email") || rows.get("contact_email") || ADMIN_DEFAULT,
+      phoneNumber: rows.get("phone_number") || "+91 70062 02496",
+      senderName: rows.get("email_sender_name") || rows.get("store_name") || "Superb Creations",
+      senderEmail:
+        rows.get("email_sender_email") ||
+        rows.get("business_email") ||
+        rows.get("contact_email") ||
+        "",
+      replyToEmail: rows.get("email_reply_to") || rows.get("support_email") || rows.get("contact_email") || "",
+      companyAddress: rows.get("email_company_address") || rows.get("address") || "",
+      emailLogoUrl: rows.get("email_logo_url") || "",
+      emailFooter: rows.get("email_footer") || "Thank you for shopping with Superb Creations.",
+      emailPrimaryColor: rows.get("email_primary_color") || "#b07a86",
+      emailSecondaryColor: rows.get("email_secondary_color") || "#f7e8e8",
+      enableEmailSending: rows.get("enable_email_sending") === "true",
+      brevoApiKey: rows.get("brevo_api_key") || "",
+      brevoContactsEnabled: rows.get("brevo_contacts_enabled") === "true",
+      instagramUrl: rows.get("instagram_url") || "",
+      facebookUrl: rows.get("facebook_url") || "",
+      youtubeUrl: rows.get("youtube_url") || "",
+    };
+  } catch (error) {
+    console.warn("[brevo] could not load email branding settings; using defaults", error);
+    return {
+      storeName: "Superb Creations",
+      contactEmail: ADMIN_DEFAULT,
+      supportEmail: ADMIN_DEFAULT,
+      businessEmail: ADMIN_DEFAULT,
+      phoneNumber: "+91 70062 02496",
+      senderName: "Superb Creations",
+      senderEmail: "",
+      replyToEmail: ADMIN_DEFAULT,
+      companyAddress: "",
+      emailLogoUrl: "",
+      emailFooter: "Thank you for shopping with Superb Creations.",
+      emailPrimaryColor: "#b07a86",
+      emailSecondaryColor: "#f7e8e8",
+      enableEmailSending: false,
+      brevoApiKey: "",
+      brevoContactsEnabled: false,
+      instagramUrl: "",
+      facebookUrl: "",
+      youtubeUrl: "",
+    };
+  }
+}
+
+async function logEmail(args: {
+  recipient: string;
+  templateKey?: string | null;
+  subject: string;
+  status: string;
+  providerMessageId?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data } = await supabaseAdmin
+      .from("email_logs")
+      .insert({
+        recipient: args.recipient,
+        template_key: args.templateKey ?? null,
+        subject: args.subject,
+        status: args.status,
+        provider: "brevo",
+        provider_message_id: args.providerMessageId ?? null,
+        error: args.error ?? null,
+        delivered_at: args.status === "sent" ? new Date().toISOString() : null,
+        metadata: args.metadata ?? {},
+      })
+      .select("id")
+      .maybeSingle();
+    return data?.id as string | undefined;
+  } catch (error) {
+    console.warn("[brevo] email log failed", error);
+    return undefined;
+  }
+}
+
+async function queueFailedEmail(args: {
+  recipient: string;
+  templateKey: string;
+  subject: string;
+  variables: Record<string, unknown>;
+  lastError: string;
+  idempotencyKey?: string;
+  emailLogId?: string;
+}) {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("email_queue").upsert(
+      {
+        recipient: args.recipient,
+        template_key: args.templateKey,
+        subject: args.subject,
+        variables: args.variables,
+        status: "queued",
+        next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        idempotency_key: args.idempotencyKey ?? null,
+        last_error: args.lastError,
+        email_log_id: args.emailLogId ?? null,
+      },
+      { onConflict: "idempotency_key" },
+    );
+  } catch (error) {
+    console.warn("[brevo] failed-email queue write failed", error);
+  }
+}
+
+async function sendBrevo(args: {
   to: string | string[];
   subject: string;
   html: string;
+  text?: string;
+  templateKey?: string;
+  variables?: Record<string, unknown>;
+  idempotencyKey?: string;
 }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn("[resend] RESEND_API_KEY not set — skipping email send");
-    return { ok: false as const, skipped: true as const };
-  }
-  const from = process.env.RESEND_FROM;
-  if (!from) {
-    console.warn(
-      "[resend] RESEND_FROM not set — skipping email send. Admin fallback: monitor the Supabase orders table and WhatsApp until a verified Resend sender/domain is configured.",
+  const settings = await loadEmailSettings();
+  const recipients = Array.isArray(args.to) ? args.to : [args.to];
+  if (!settings.enableEmailSending) {
+    console.warn("[brevo] email sending disabled in Business Settings — skipping email send");
+    await Promise.all(
+      recipients.map((recipient) =>
+        logEmail({
+          recipient,
+          templateKey: args.templateKey,
+          subject: args.subject,
+          status: "skipped",
+          error: "Email sending disabled",
+        }),
+      ),
     );
     return { ok: false as const, skipped: true as const };
   }
-  if (from.toLowerCase().includes("onboarding@resend.dev")) {
-    console.warn(
-      "[resend] RESEND_FROM uses onboarding@resend.dev — skipping production email. Admin fallback: monitor the Supabase orders table and WhatsApp, then configure a verified Resend domain.",
+  if (!settings.brevoApiKey) {
+    console.warn("[brevo] API key missing in Business Settings — skipping email send");
+    await Promise.all(
+      recipients.map((recipient) =>
+        logEmail({
+          recipient,
+          templateKey: args.templateKey,
+          subject: args.subject,
+          status: "skipped",
+          error: "Brevo API key missing",
+        }),
+      ),
     );
     return { ok: false as const, skipped: true as const };
   }
-  const res = await fetch("https://api.resend.com/emails", {
+  if (!settings.senderEmail) {
+    console.warn("[brevo] sender email missing in Business Settings — skipping email send");
+    await Promise.all(
+      recipients.map((recipient) =>
+        logEmail({
+          recipient,
+          templateKey: args.templateKey,
+          subject: args.subject,
+          status: "skipped",
+          error: "Sender email missing",
+        }),
+      ),
+    );
+    return { ok: false as const, skipped: true as const };
+  }
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      "api-key": settings.brevoApiKey,
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
-      from,
-      to: Array.isArray(args.to) ? args.to : [args.to],
+      sender: { name: settings.senderName, email: settings.senderEmail },
+      to: recipients.map((email) => ({ email })),
+      replyTo: settings.replyToEmail ? { email: settings.replyToEmail } : undefined,
       subject: args.subject,
-      html: args.html,
+      htmlContent: args.html,
+      textContent: args.text,
+      tags: args.templateKey ? [args.templateKey] : undefined,
     }),
   });
   if (!res.ok) {
     const text = await res.text();
-    console.error("[resend] send failed", res.status, text);
+    const logs = await Promise.all(
+      recipients.map((recipient) =>
+        logEmail({
+          recipient,
+          templateKey: args.templateKey,
+          subject: args.subject,
+          status: "failed",
+          error: text,
+          metadata: { status: res.status },
+        }),
+      ),
+    );
+    await Promise.all(
+      recipients.map((recipient, index) =>
+        queueFailedEmail({
+          recipient,
+          templateKey: args.templateKey || "custom",
+          subject: args.subject,
+          variables: args.variables ?? {},
+          lastError: text,
+          idempotencyKey: args.idempotencyKey
+            ? `${args.idempotencyKey}:${recipient}`
+            : undefined,
+          emailLogId: logs[index],
+        }),
+      ),
+    );
+    console.error("[brevo] send failed", res.status, text);
     return { ok: false as const, error: text };
   }
-  const json = (await res.json()) as { id?: string };
-  return { ok: true as const, id: json.id };
+  const json = (await res.json()) as { messageId?: string };
+  await Promise.all(
+    recipients.map((recipient) =>
+      logEmail({
+        recipient,
+        templateKey: args.templateKey,
+        subject: args.subject,
+        status: "sent",
+        providerMessageId: json.messageId,
+        metadata: { response: json },
+      }),
+    ),
+  );
+  return { ok: true as const, id: json.messageId };
 }
 
 function itemRows(items: ItemLine[]) {
@@ -93,23 +330,121 @@ function escape(s: string) {
     .replace(/"/g, "&quot;");
 }
 
-function shell(title: string, body: string) {
-  return `<!doctype html><html><body style="margin:0;background:#f6f5f1;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f5f1;padding:24px 0">
+function renderTemplate(raw: string, vars: Record<string, unknown>) {
+  return raw.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => String(vars[key] ?? ""));
+}
+
+function shell(title: string, body: string, settings: EmailSettings) {
+  const logo = settings.emailLogoUrl
+    ? `<img src="${escape(settings.emailLogoUrl)}" alt="${escape(settings.storeName)}" style="display:block;max-height:56px;max-width:180px;margin-bottom:10px" />`
+    : "";
+  return `<!doctype html><html><body style="margin:0;background:${escape(settings.emailSecondaryColor)};font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${escape(settings.emailSecondaryColor)};padding:24px 0">
     <tr><td align="center">
       <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)">
-        <tr><td style="padding:24px 28px;border-bottom:1px solid #eee">
-          <div style="font-family:Georgia,serif;font-size:22px;font-weight:600;letter-spacing:.5px">Superb Creations</div>
+        <tr><td style="padding:24px 28px;border-bottom:1px solid #eee;border-top:4px solid ${escape(settings.emailPrimaryColor)}">
+          ${logo}
+          <div style="font-family:Georgia,serif;font-size:22px;font-weight:600;letter-spacing:.5px">${escape(settings.storeName)}</div>
           <div style="font-size:12px;color:#888;margin-top:2px">${escape(title)}</div>
         </td></tr>
         <tr><td style="padding:24px 28px">${body}</td></tr>
         <tr><td style="padding:18px 28px;border-top:1px solid #eee;font-size:12px;color:#888">
-          Need help? Reply to this email or WhatsApp +91 70062 02496.
+          ${escape(settings.emailFooter)}<br/>
+          ${settings.companyAddress ? `${escape(settings.companyAddress)}<br/>` : ""}
+          Need help? Reply to this email or contact ${escape(settings.supportEmail)}
+          ${settings.phoneNumber ? ` · ${escape(settings.phoneNumber)}` : ""}.<br/>
+          ${settings.instagramUrl ? `<a href="${escape(settings.instagramUrl)}" style="color:${escape(settings.emailPrimaryColor)};margin-right:10px">Instagram</a>` : ""}
+          ${settings.facebookUrl ? `<a href="${escape(settings.facebookUrl)}" style="color:${escape(settings.emailPrimaryColor)};margin-right:10px">Facebook</a>` : ""}
+          ${settings.youtubeUrl ? `<a href="${escape(settings.youtubeUrl)}" style="color:${escape(settings.emailPrimaryColor)}">YouTube</a>` : ""}
         </td></tr>
       </table>
     </td></tr>
   </table>
   </body></html>`;
+}
+
+async function loadTemplate(key: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("email_templates")
+    .select("*")
+    .eq("key", key)
+    .eq("active", true)
+    .maybeSingle();
+  if (error) throw error;
+  return data as any | null;
+}
+
+export async function sendTemplatedEmail(args: {
+  templateKey: string;
+  to: string | string[];
+  variables?: Record<string, unknown>;
+  idempotencyKey?: string;
+}) {
+  const settings = await loadEmailSettings();
+  const template = await loadTemplate(args.templateKey);
+  const variables = { store_name: settings.storeName, support_email: settings.supportEmail, ...(args.variables ?? {}) };
+  const subject = template
+    ? renderTemplate(template.subject, variables)
+    : String(variables.subject || settings.storeName);
+  const html = template
+    ? renderTemplate(template.body_html, variables)
+    : String(variables.body_html || "");
+  const text = template
+    ? renderTemplate(template.body_text || "", variables)
+    : String(variables.body_text || "");
+  return sendBrevo({
+    to: args.to,
+    subject,
+    html: shell(template?.name || subject, html, settings),
+    text,
+    templateKey: args.templateKey,
+    variables,
+    idempotencyKey: args.idempotencyKey,
+  });
+}
+
+export async function syncBrevoContact(args: {
+  email: string;
+  name?: string;
+  lists?: string[];
+  attributes?: Record<string, unknown>;
+}) {
+  const settings = await loadEmailSettings();
+  if (!settings.enableEmailSending || !settings.brevoContactsEnabled || !settings.brevoApiKey) {
+    return { ok: false as const, skipped: true as const };
+  }
+  const res = await fetch("https://api.brevo.com/v3/contacts", {
+    method: "POST",
+    headers: {
+      "api-key": settings.brevoApiKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      email: args.email,
+      attributes: { FIRSTNAME: args.name || "", ...(args.attributes ?? {}) },
+      updateEnabled: true,
+    }),
+  });
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const text = res.ok ? "" : await res.text();
+  await Promise.all(
+    (args.lists ?? ["Customers"]).map((listName) =>
+      supabaseAdmin.from("brevo_sync").upsert(
+        {
+          entity_type: "contact",
+          entity_id: args.email.toLowerCase(),
+          list_name: listName,
+          status: res.ok ? "synced" : "failed",
+          last_error: text || null,
+          synced_at: res.ok ? new Date().toISOString() : null,
+        },
+        { onConflict: "entity_type,entity_id,list_name" },
+      ),
+    ),
+  );
+  return { ok: res.ok as boolean, error: text || null };
 }
 
 export const notificationSchema = z.object({
@@ -133,7 +468,8 @@ export const notificationSchema = z.object({
 export async function sendOrderNotificationsForOrder(
   data: z.infer<typeof notificationSchema>,
 ) {
-    const adminEmail = process.env.ADMIN_EMAIL || ADMIN_DEFAULT;
+    const settings = await loadEmailSettings();
+    const adminEmail = settings.businessEmail || settings.contactEmail || ADMIN_DEFAULT;
     const rows = itemRows(data.items);
 
     const summary = `
@@ -173,30 +509,173 @@ export async function sendOrderNotificationsForOrder(
       <p style="font-size:13px;color:#666;margin:16px 0 0">Shipping to:<br/><span style="white-space:pre-wrap">${escape(data.address)}</span></p>`;
 
     const [adminRes, customerRes] = await Promise.allSettled([
-      sendResend({
+      sendBrevo({
         to: adminEmail,
         subject: `New order — ${data.customerName} (${inr(data.total)})`,
-        html: shell("New order received", adminBody),
+        html: shell("New order received", adminBody, settings),
+        templateKey: "admin_order_created",
+        variables: {
+          customer_name: data.customerName,
+          total: inr(data.total),
+          payment_method: data.paymentMethod,
+        },
+        idempotencyKey: `admin-order-created:${data.orderId}`,
       }),
       data.customerEmail
-        ? sendResend({
+        ? sendBrevo({
             to: data.customerEmail,
-            subject: `Order confirmed — Superb Creations`,
-            html: shell("Order confirmation", customerBody),
+            subject: `Order confirmed — ${settings.storeName}`,
+            html: shell("Order confirmation", customerBody, settings),
+            templateKey: "order_confirmed",
+            variables: {
+              customer_name: data.customerName,
+              order_number: `#${data.orderId.slice(0, 8).toUpperCase()}`,
+              total: inr(data.total),
+            },
+            idempotencyKey: `order-confirmed:${data.orderId}`,
           })
         : Promise.resolve({ ok: false as const, skipped: true as const }),
     ]);
+    if (data.customerEmail) {
+      syncBrevoContact({
+        email: data.customerEmail,
+        name: data.customerName,
+        lists: ["Customers"],
+      }).catch((error) => console.warn("[brevo] contact sync failed", error));
+    }
 
     return {
       admin: adminRes.status === "fulfilled" ? adminRes.value : { ok: false, error: String(adminRes.reason) },
       customer: customerRes.status === "fulfilled" ? customerRes.value : { ok: false, error: String(customerRes.reason) },
-      emailEnabled: !!process.env.RESEND_API_KEY,
+      emailEnabled: settings.enableEmailSending,
     };
+}
+
+export async function sendOrderStatusEmail(args: {
+  orderId: string;
+  templateKey: string;
+  variables?: Record<string, unknown>;
+}) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: order, error } = await supabaseAdmin
+    .from("orders")
+    .select("id,order_number,customer_name,email,total,tracking_number,courier_name,estimated_delivery_date,payment_utr,payment_rejection_reason")
+    .eq("id", args.orderId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!order?.email) return { ok: false as const, skipped: true as const };
+  return sendTemplatedEmail({
+    templateKey: args.templateKey,
+    to: order.email,
+    variables: {
+      customer_name: order.customer_name,
+      order_number: order.order_number || `#${order.id.slice(0, 8).toUpperCase()}`,
+      total: inr(Number(order.total || 0)),
+      tracking_info: [order.courier_name, order.tracking_number, order.estimated_delivery_date].filter(Boolean).join(" · "),
+      payment_utr: order.payment_utr || "",
+      reason: order.payment_rejection_reason || "",
+      ...(args.variables ?? {}),
+    },
+    idempotencyKey: `${args.templateKey}:${args.orderId}:${JSON.stringify(args.variables ?? {})}`,
+  });
 }
 
 export const sendOrderNotifications = createServerFn({ method: "POST" })
   .inputValidator((data) => notificationSchema.parse(data))
   .handler(async ({ data }) => sendOrderNotificationsForOrder(data));
+
+const testEmailSchema = z.object({
+  accessToken: z.string().min(20),
+  to: z.string().email(),
+});
+
+export const sendBrevoTestEmail = createServerFn({ method: "POST" })
+  .inputValidator((data) => testEmailSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { requireOwnerAdmin } = await import("@/lib/admin.server");
+    await requireOwnerAdmin(data.accessToken);
+    return sendTemplatedEmail({
+      templateKey: "announcement",
+      to: data.to,
+      variables: {
+        announcement_title: "Brevo test email",
+        announcement_body: "Your Superb Creations Brevo email settings are working.",
+      },
+      idempotencyKey: `brevo-test:${Date.now()}:${data.to}`,
+    });
+  });
+
+export const checkBrevoConnection = createServerFn({ method: "POST" })
+  .inputValidator((data) => z.object({ accessToken: z.string().min(20) }).parse(data))
+  .handler(async ({ data }) => {
+    const { requireOwnerAdmin } = await import("@/lib/admin.server");
+    await requireOwnerAdmin(data.accessToken);
+    const settings = await loadEmailSettings();
+    if (!settings.brevoApiKey) return { ok: false, error: "Brevo API key missing" };
+    const res = await fetch("https://api.brevo.com/v3/account", {
+      headers: {
+        "api-key": settings.brevoApiKey,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return { ok: false, error: await res.text() };
+    return { ok: true, account: await res.json() };
+  });
+
+const sendCampaignSchema = z.object({
+  accessToken: z.string().min(20),
+  campaignId: z.string().uuid(),
+});
+
+export const sendNewsletterCampaign = createServerFn({ method: "POST" })
+  .inputValidator((data) => sendCampaignSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { requireOwnerAdmin } = await import("@/lib/admin.server");
+    await requireOwnerAdmin(data.accessToken);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: campaign, error: campaignError } = await supabaseAdmin
+      .from("newsletter_campaigns")
+      .select("*")
+      .eq("id", data.campaignId)
+      .maybeSingle();
+    if (campaignError) throw campaignError;
+    if (!campaign) throw new Error("Campaign not found.");
+
+    const { data: subscribers, error: subscribersError } = await supabaseAdmin
+      .from("newsletter_subscribers")
+      .select("email,user_id")
+      .eq("subscribed", true)
+      .not("confirmed_at", "is", null);
+    if (subscribersError) throw subscribersError;
+    const recipients = [...new Map((subscribers ?? []).map((s: any) => [String(s.email).toLowerCase(), s])).values()];
+    for (const recipient of recipients) {
+      const send = await sendBrevo({
+        to: recipient.email,
+        subject: campaign.subject,
+        html: shell(campaign.name, campaign.body_html, await loadEmailSettings()),
+        templateKey: "newsletter",
+        variables: {
+          campaign_subject: campaign.subject,
+          campaign_body: campaign.body_html,
+        },
+        idempotencyKey: `campaign:${campaign.id}:${recipient.email}`,
+      });
+      await supabaseAdmin.from("newsletter_campaign_recipients").upsert(
+        {
+          campaign_id: campaign.id,
+          email: recipient.email,
+          user_id: recipient.user_id,
+          status: send.ok ? "sent" : "failed",
+        },
+        { onConflict: "campaign_id,email" },
+      );
+    }
+    await supabaseAdmin
+      .from("newsletter_campaigns")
+      .update({ status: "sent", sent_at: new Date().toISOString() })
+      .eq("id", campaign.id);
+    return { ok: true, sent: recipients.length };
+  });
 
 const shippedSchema = z.object({
   orderId: z.string().uuid(),
@@ -207,17 +686,15 @@ const shippedSchema = z.object({
 
 export const sendOrderShippedEmail = createServerFn({ method: "POST" })
   .inputValidator((data) => shippedSchema.parse(data))
-  .handler(async ({ data }) => {
-    const body = `
-      <p style="font-size:16px;margin:0 0 12px">Hi ${escape(data.customerName.split(" ")[0] || "there")},</p>
-      <p style="font-size:14px;line-height:1.6;color:#444">
-        Great news — your order <strong>#${data.orderId.slice(0, 8).toUpperCase()}</strong> has shipped!
-      </p>
-      ${data.trackingInfo ? `<p style="font-size:14px;color:#444"><strong>Tracking:</strong> ${escape(data.trackingInfo)}</p>` : ""}
-      <p style="font-size:13px;color:#666;margin-top:16px">We'll be in touch on WhatsApp if anything else is needed.</p>`;
-    return sendResend({
+  .handler(async ({ data }) =>
+    sendTemplatedEmail({
+      templateKey: "order_shipped",
       to: data.customerEmail,
-      subject: "Your order is on the way ✨",
-      html: shell("Order shipped", body),
-    });
-  });
+      variables: {
+        customer_name: data.customerName,
+        order_number: `#${data.orderId.slice(0, 8).toUpperCase()}`,
+        tracking_info: data.trackingInfo || "",
+      },
+      idempotencyKey: `order-shipped:${data.orderId}`,
+    }),
+  );

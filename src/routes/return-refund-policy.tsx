@@ -16,6 +16,7 @@ export const Route = createFileRoute("/return-refund-policy")({
       eyebrow="Policy"
       title="Return & Refund Policy"
       updated="June 22, 2026"
+      settingKey="return_refund_policy"
       sections={[
         {
           title: "Eligibility",

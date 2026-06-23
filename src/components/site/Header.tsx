@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { Menu, X, ShoppingBag, User } from "lucide-react";
+import { Menu, X, ShoppingBag, User, Heart } from "lucide-react";
 import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
+import { useBusinessSettings } from "@/lib/business-settings";
+import { useWishlist } from "@/lib/customer-engagement";
 import logo from "@/assets/superb-creations-logo.png";
 
 const nav = [
@@ -17,18 +19,22 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const { count, setOpen: setCartOpen } = useCart();
   const { user, isAdmin } = useAuth();
+  const { data: wishlist = [] } = useWishlist(user && !isAdmin ? user.id : undefined);
+  const { data: settings } = useBusinessSettings();
+  const logoSrc = settings?.logo_url || logo;
+  const storeName = settings?.store_name || "Superb Creations";
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">
       <div className="container-boutique flex h-16 items-center justify-between md:h-20">
         <Link to="/" className="flex items-center gap-3">
           <img
-            src={logo}
-            alt="Superb Creations"
+            src={logoSrc}
+            alt={storeName}
             className="h-11 w-11 rounded-full object-cover md:h-12 md:w-12"
           />
           <span className="font-display text-2xl tracking-tight md:text-3xl">
-            Superb Creations
+            {storeName}
           </span>
           <span className="hidden text-[0.6rem] uppercase tracking-[0.32em] text-muted-foreground sm:inline">
             est. boutique
@@ -75,6 +81,20 @@ export function Header() {
           >
             <User size={17} />
           </Link>
+          {user && !isAdmin && (
+            <Link
+              to="/account"
+              aria-label="Wishlist"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-border transition-colors hover:bg-secondary"
+            >
+              <Heart size={17} />
+              {wishlist.length > 0 && (
+                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[0.6rem] font-medium text-primary-foreground">
+                  {wishlist.length}
+                </span>
+              )}
+            </Link>
+          )}
           <button
             type="button"
             onClick={() => setCartOpen(true)}

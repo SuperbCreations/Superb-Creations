@@ -1,10 +1,13 @@
 import { MessageCircle } from "lucide-react";
-import { whatsappLink } from "@/lib/products";
+import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
 
 export function WhatsappFab() {
+  const { data: settings } = useBusinessSettings();
+  if (!settings || !settingBool(settings, "enable_whatsapp")) return null;
+
   return (
     <a
-      href={whatsappLink("Hi Superb Creations! I'd like to know more about your collection.")}
+      href={whatsappUrl(settings, `Hi ${settings.store_name}! I'd like to know more about your collection.`)}
       target="_blank"
       rel="noreferrer"
       aria-label="Order on WhatsApp"

@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { trackAnalyticsEvent } from "@/lib/analytics";
+const db = supabase as any;
 
 export type Review = {
   id: string;
@@ -10,6 +12,11 @@ export type Review = {
   title: string;
   body: string;
   approved: boolean;
+  status?: string;
+  verified_purchase?: boolean;
+  featured?: boolean;
+  admin_reply?: string | null;
+  images?: string[];
   created_at: string;
 };
 
@@ -18,7 +25,7 @@ export function useReviews(productId: string | undefined) {
     queryKey: ["reviews", productId],
     enabled: !!productId,
     queryFn: async (): Promise<Review[]> => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("reviews")
         .select("*")
         .eq("product_id", productId!)
@@ -34,7 +41,7 @@ export function useAllProductRatings() {
   return useQuery({
     queryKey: ["ratings-summary"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("reviews")
         .select("product_id, rating")
         .eq("approved", true);
@@ -64,8 +71,16 @@ export function useSubmitReview(productId: string) {
       body: string;
       author_name: string;
       user_id: string;
+      images?: string[];
     }) => {
-      const { error } = await supabase.from("reviews").upsert(
+      const { data: canReview, error: canReviewError } = await db.rpc("can_review_product", {
+        p_product_id: productId,
+        p_user_id: input.user_id,
+      });
+      if (canReviewError) throw canReviewError;
+      if (!canReview) throw new Error("Only verified buyers can review this product.");
+
+      const { error } = await db.from("reviews").upsert(
         {
           product_id: productId,
           user_id: input.user_id,
@@ -73,10 +88,20 @@ export function useSubmitReview(productId: string) {
           rating: input.rating,
           title: input.title,
           body: input.body,
+          images: input.images ?? [],
+          verified_purchase: true,
+          approved: false,
+          status: "pending",
         },
         { onConflict: "product_id,user_id" },
       );
       if (error) throw error;
+      trackAnalyticsEvent({
+        eventType: "review_submitted",
+        productId,
+        userId: input.user_id,
+        metadata: { rating: input.rating },
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["reviews", productId] });

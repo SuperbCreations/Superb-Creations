@@ -3,9 +3,10 @@ import { ArrowRight, MessageCircle, Sparkles, Truck, Heart } from "lucide-react"
 import heroImg from "@/assets/hero-1.jpg";
 import collectionImg from "@/assets/collection-1.jpg";
 import cosmeticsImg from "@/assets/cosmetics.jpg";
-import { useProducts, whatsappLink } from "@/lib/products";
+import { useProducts } from "@/lib/products";
 import { useLookbookItems } from "@/lib/lookbook";
 import { ProductCard } from "@/components/site/ProductCard";
+import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,46 +30,57 @@ export const Route = createFileRoute("/")({
 function Home() {
   const { data: products = [] } = useProducts();
   const { data: lookbookItems = [] } = useLookbookItems();
+  const { data: settings } = useBusinessSettings();
   const featured = products.slice(0, 4);
   const lookbookPreview = lookbookItems[0];
+  const heroImage = settings?.homepage_banner_url || heroImg;
+  const canWhatsapp = settings && settingBool(settings, "enable_whatsapp");
+  const freeShipping = settings?.free_shipping_threshold || "2500";
 
   return (
     <>
       <section className="relative overflow-hidden bg-blush">
         <div className="container-boutique grid items-center gap-10 py-12 md:grid-cols-[1.05fr_1fr] md:gap-16 md:py-20">
           <div className="fade-up max-w-xl">
-            <p className="eyebrow">New season · Spring edit</p>
+            <p className="eyebrow">{settings?.hero_eyebrow || "New season · Spring edit"}</p>
             <h1 className="mt-4 font-display text-5xl leading-[1.02] tracking-tight text-foreground md:text-7xl">
-              Quietly elegant.<br />
-              <span className="italic text-foreground/80">Made for every day.</span>
+              {settings?.hero_title || "Quietly elegant."}<br />
+              <span className="italic text-foreground/80">
+                {settings?.hero_subtitle || "Made for every day."}
+              </span>
             </h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
-              Hand-finished kurta sets, flowy silhouettes and timeless drapes — designed
-              in soft pastels for the modern Indian wardrobe.
+              {settings?.hero_description ||
+                "Hand-finished kurta sets, flowy silhouettes and timeless drapes — designed in soft pastels for the modern Indian wardrobe."}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                to="/shop"
+              <a
+                href={settings?.hero_button_link || "/shop"}
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-xs uppercase tracking-[0.22em] text-primary-foreground transition-opacity hover:opacity-90"
               >
-                Shop the edit <ArrowRight size={14} />
-              </Link>
-              <a
-                href={whatsappLink("Hi! I'd like to place an order with Superb Creations.")}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-primary/30 px-6 py-3 text-xs uppercase tracking-[0.22em] text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-              >
-                <MessageCircle size={14} /> Order on WhatsApp
+                {settings?.hero_button_text || "Shop the edit"} <ArrowRight size={14} />
               </a>
+              {canWhatsapp && (
+                <a
+                  href={whatsappUrl(
+                    settings,
+                    `Hi! I'd like to place an order with ${settings.store_name}.`,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-primary/30 px-6 py-3 text-xs uppercase tracking-[0.22em] text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
+                >
+                  <MessageCircle size={14} /> Order on WhatsApp
+                </a>
+              )}
             </div>
           </div>
 
           <div className="relative">
             <div className="hover-zoom aspect-[3/4] overflow-hidden rounded-sm shadow-soft">
               <img
-                src={heroImg}
-                alt="Model wearing a soft pink embroidered kurta from Superb Creations"
+                src={heroImage}
+                alt={`${settings?.store_name || "Superb Creations"} homepage banner`}
                 width={1600}
                 height={1920}
                 className="h-full w-full object-cover"
@@ -78,18 +90,22 @@ function Home() {
           </div>
         </div>
 
-        <div className="overflow-hidden border-y border-primary/10 bg-background/40 py-4">
+        <div
+          className="overflow-hidden border-y border-primary/10 bg-background/40 py-4"
+          style={settings?.announcement_color ? { backgroundColor: settings.announcement_color } : undefined}
+        >
           <div className="marquee text-sm uppercase tracking-[0.32em] text-foreground/70">
             {Array.from({ length: 2 }).map((_, i) => (
               <div key={i} className="flex shrink-0 gap-12">
-                <span>Free shipping over ₹2,500</span>
-                <span>✦</span>
-                <span>Order on WhatsApp · +91 70062 02496</span>
-                <span>✦</span>
-                <span>Handcrafted in India</span>
-                <span>✦</span>
-                <span>New drops every Friday</span>
-                <span>✦</span>
+                {(settings?.announcement_bar ||
+                  `Free shipping over ₹${freeShipping} ✦ Order on WhatsApp · ${settings?.phone_number || "+91 70062 02496"} ✦ Handcrafted in India ✦ New drops every Friday`)
+                  .split("✦")
+                  .map((part, partIndex) => (
+                    <span key={`${i}-${partIndex}`}>
+                      {part.trim()}
+                      <span className="ml-12">✦</span>
+                    </span>
+                  ))}
               </div>
             ))}
           </div>
@@ -100,7 +116,14 @@ function Home() {
         <div className="flex items-end justify-between gap-6">
           <div>
             <p className="eyebrow">The Edit</p>
-            <h2 className="mt-2 font-display text-4xl md:text-5xl">Pieces we love right now</h2>
+            <h2 className="mt-2 font-display text-4xl md:text-5xl">
+              {settings?.featured_collection_title || "Pieces we love right now"}
+            </h2>
+            {settings?.featured_collection_description && (
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+                {settings.featured_collection_description}
+              </p>
+            )}
           </div>
           <Link
             to="/shop"
@@ -177,11 +200,11 @@ function Home() {
           <div className="order-1 md:order-2 md:pl-8">
             <p className="eyebrow">Lookbook · Vol. 01</p>
             <h2 className="mt-3 font-display text-4xl md:text-5xl">
-              An ode to soft mornings.
+              {settings?.lookbook_title || "An ode to soft mornings."}
             </h2>
             <p className="mt-5 max-w-md text-muted-foreground">
-              Our spring lookbook celebrates ease — the kind of pieces you pull
-              on without thinking, that quietly turn heads anyway.
+              {settings?.lookbook_description ||
+                "Our spring lookbook celebrates ease — the kind of pieces you pull on without thinking, that quietly turn heads anyway."}
             </p>
             <Link
               to="/lookbook"
@@ -196,7 +219,7 @@ function Home() {
       <section className="container-boutique grid gap-10 py-20 md:grid-cols-3 md:py-24">
         {[
           { icon: Sparkles, title: "Handcrafted detail", body: "Every piece carries the mark of skilled artisans across India." },
-          { icon: Truck, title: "Pan-India delivery", body: "Free shipping on orders above ₹2,500. Easy WhatsApp returns." },
+          { icon: Truck, title: "Pan-India delivery", body: `Free shipping on orders above ₹${freeShipping}. Easy support for returns.` },
           { icon: Heart, title: "Made with intention", body: "Small batches, thoughtful fabrics, designed to be loved for years." },
         ].map(({ icon: Icon, title, body }) => (
           <div key={title}>

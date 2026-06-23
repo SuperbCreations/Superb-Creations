@@ -37,16 +37,14 @@ RAZORPAY_KEY_SECRET="your-razorpay-key-secret"
 RAZORPAY_WEBHOOK_SECRET="your-razorpay-webhook-secret"
 ```
 
-Resend:
+Brevo email:
 
 ```bash
-RESEND_API_KEY="re_your_resend_api_key"
-RESEND_FROM="Superb Creations <orders@your-verified-domain.com>"
 ADMIN_EMAIL="owner@example.com"
 SITE_URL="https://www.your-domain.com"
 ```
 
-`RESEND_API_KEY` is server-only. If `RESEND_FROM` is not set, email sending is skipped with a server log until a verified Resend sender/domain is ready.
+Brevo API key and sender settings are managed in Admin → Settings → Email. The API key is read only by server code and is not returned by public business settings.
 
 ## Supabase Setup
 
@@ -69,7 +67,7 @@ The migrations create the public tables, RLS policies, stock/payment RPCs, Razor
 - Replace placeholder legal/business details in Privacy, Terms, Shipping, Return/Refund and Support pages.
 - Set `SITE_URL` in Vercel so `sitemap.xml` and `robots.txt` produce absolute production URLs.
 - Verify Razorpay webhook delivery in the Razorpay dashboard after deployment.
-- Verify Resend sender/domain. `RESEND_FROM` must not be `onboarding@resend.dev` for production email.
+- Verify Brevo sender/domain, then add the Brevo API key and sender emails in Admin → Settings → Email.
 - Monitor Supabase `orders` as the admin notification fallback until production email is confirmed.
 
 ## Vercel Deployment

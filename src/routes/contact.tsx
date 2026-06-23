@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 import { Facebook, Instagram, Youtube, MessageCircle, Mail, MapPin } from "lucide-react";
-import { whatsappLink } from "@/lib/products";
+import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
 
 const schema = z.object({
   name: z.string().trim().min(1, "Please enter your name").max(80),
@@ -26,20 +26,27 @@ export const Route = createFileRoute("/contact")({
 });
 
 function Contact() {
+  const { data: settings } = useBusinessSettings();
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const storeName = settings?.store_name || "Superb Creations";
+  const canWhatsapp = settings && settingBool(settings, "enable_whatsapp");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!settings || !canWhatsapp) {
+      setError("WhatsApp support is currently unavailable. Please use email.");
+      return;
+    }
     const parsed = schema.safeParse({ name, message });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Please check your details");
       return;
     }
     setError(null);
-    const text = `Hi Superb Creations, this is ${parsed.data.name}.\n\n${parsed.data.message}`;
-    window.open(whatsappLink(text), "_blank", "noopener,noreferrer");
+    const text = `Hi ${storeName}, this is ${parsed.data.name}.\n\n${parsed.data.message}`;
+    window.open(whatsappUrl(settings, text), "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -51,69 +58,63 @@ function Contact() {
         </h1>
         <p className="mt-5 max-w-md text-muted-foreground">
           Questions about sizing, custom orders or wholesale? We reply fastest on
-          WhatsApp — usually within a few hours.
+          WhatsApp during store hours.
         </p>
 
         <ul className="mt-10 space-y-5 text-sm">
-          <li className="flex items-center gap-4">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
-              <MessageCircle size={16} />
-            </span>
-            <a href={whatsappLink("Hi Superb Creations!")} target="_blank" rel="noreferrer" className="hover:underline">
-              WhatsApp · +91 70062 02496
-            </a>
-          </li>
+          {canWhatsapp && (
+            <li className="flex items-center gap-4">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
+                <MessageCircle size={16} />
+              </span>
+              <a
+                href={whatsappUrl(settings, `Hi ${storeName}!`)}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:underline"
+              >
+                WhatsApp · {settings.phone_number}
+              </a>
+            </li>
+          )}
           <li className="flex items-center gap-4">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <Mail size={16} />
             </span>
-            <a href="mailto:superbcreations55@gmail.com" className="hover:underline">
-              superbcreations55@gmail.com
+            <a href={`mailto:${settings?.contact_email || "superbcreations55@gmail.com"}`} className="hover:underline">
+              {settings?.contact_email || "superbcreations55@gmail.com"}
             </a>
           </li>
           <li className="flex items-center gap-4">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <MapPin size={16} />
             </span>
-            <span>Studio · India · Mon–Sat, 10am–7pm</span>
+            <span>
+              {[settings?.address, settings?.city, settings?.state, settings?.country]
+                .filter(Boolean)
+                .join(" · ")}{" "}
+              · {settings?.business_hours || "Mon-Sat, 10am-7pm"}
+            </span>
           </li>
         </ul>
 
         <div className="mt-8 flex gap-3">
-          <a
-            href="https://www.instagram.com/superb_creations_?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw=="
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Instagram"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
-          >
-            <Instagram size={16} />
-          </a>
-          <a
-            href="https://youtube.com/@superb_creations?si=8gHDjFUhjRMpktts"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="YouTube"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
-          >
-            <Youtube size={16} />
-          </a>
-          <a
-            href="https://www.facebook.com/share/1U22A7sHpi/?mibextid=wwXIfr"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Facebook"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
-          >
-            <Facebook size={16} />
-          </a>
+          {settings && settingBool(settings, "show_instagram") && settings.instagram_url && (
+            <SocialIcon href={settings.instagram_url} label="Instagram" icon={<Instagram size={16} />} />
+          )}
+          {settings && settingBool(settings, "show_youtube") && settings.youtube_url && (
+            <SocialIcon href={settings.youtube_url} label="YouTube" icon={<Youtube size={16} />} />
+          )}
+          {settings && settingBool(settings, "show_facebook") && settings.facebook_url && (
+            <SocialIcon href={settings.facebook_url} label="Facebook" icon={<Facebook size={16} />} />
+          )}
         </div>
       </div>
 
       <form onSubmit={submit} className="rounded-sm bg-secondary/60 p-8 md:p-10">
         <h2 className="font-display text-2xl">Send a message</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          We'll reply on WhatsApp — your message opens a chat with us.
+          <p className="mt-1 text-sm text-muted-foreground">
+          We'll reply on WhatsApp when it is available, or by email.
         </p>
 
         <div className="mt-6 space-y-5">
@@ -141,6 +142,7 @@ function Contact() {
           {error && <p className="text-sm text-destructive">{error}</p>}
           <button
             type="submit"
+            disabled={!canWhatsapp}
             className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-xs uppercase tracking-[0.22em] text-primary-foreground hover:opacity-90"
           >
             <MessageCircle size={14} /> Send via WhatsApp
@@ -148,5 +150,27 @@ function Contact() {
         </div>
       </form>
     </section>
+  );
+}
+
+function SocialIcon({
+  href,
+  label,
+  icon,
+}: {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={label}
+      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border hover:bg-primary hover:text-primary-foreground"
+    >
+      {icon}
+    </a>
   );
 }

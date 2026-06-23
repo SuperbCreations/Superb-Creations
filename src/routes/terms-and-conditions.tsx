@@ -16,6 +16,7 @@ export const Route = createFileRoute("/terms-and-conditions")({
       eyebrow="Policy"
       title="Terms & Conditions"
       updated="June 22, 2026"
+      settingKey="terms_policy"
       sections={[
         {
           title: "Orders",

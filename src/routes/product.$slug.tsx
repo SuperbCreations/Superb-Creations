@@ -1,12 +1,11 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { MessageCircle, ShoppingBag, ArrowLeft, Check, Star } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   useProduct,
   useProducts,
   useVariants,
-  whatsappOrderLink,
   inr,
   effectivePrice,
   effectiveStock,
@@ -17,6 +16,10 @@ import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { useReviews, useSubmitReview } from "@/lib/reviews";
 import { ProductCard } from "@/components/site/ProductCard";
+import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
+import { useRecentlyViewed, useTrackRecentlyViewed } from "@/lib/customer-engagement";
+import { supabase } from "@/integrations/supabase/client";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 export const Route = createFileRoute("/product/$slug")({
   component: ProductPage,
@@ -38,10 +41,26 @@ function ProductPage() {
   const { data: product, isLoading } = useProduct(slug);
   const { data: all = [] } = useProducts();
   const { data: variants = [] } = useVariants(product?.id);
+  const { data: settings } = useBusinessSettings();
   const { addItem, setOpen } = useCart();
+  const { user } = useAuth();
+  const trackViewed = useTrackRecentlyViewed(user?.id);
+  const { data: recentlyViewed = [] } = useRecentlyViewed(user?.id);
   const [added, setAdded] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (product?.id) {
+      trackViewed.mutate(product.id);
+      trackAnalyticsEvent({
+        eventType: "product_view",
+        productId: product.id,
+        userId: user?.id,
+        metadata: { slug: product.slug },
+      });
+    }
+  }, [product?.id, product?.slug, trackViewed, user?.id]);
 
   if (isLoading) {
     return (
@@ -66,7 +85,11 @@ function ProductPage() {
     );
   }
 
-  const related = all.filter((p) => p.id !== product.id).slice(0, 4);
+  const recentProducts = recentlyViewed
+    .map((row: any) => row.products)
+    .filter((p: any) => p && p.id !== product.id)
+    .slice(0, 4);
+  const related = (recentProducts.length > 0 ? recentProducts : all.filter((p) => p.id !== product.id)).slice(0, 4);
   const hasVariants = variants.length > 0;
 
   const sizes = Array.from(new Set(variants.map((v) => v.size).filter(Boolean)));
@@ -92,6 +115,7 @@ function ProductPage() {
   const selected = matchVariant();
   const price = effectivePrice(product, selected);
   const stock = effectiveStock(product, selected);
+  const canOrderOnWhatsapp = settings && settingBool(settings, "enable_whatsapp");
   const canBuy =
     product.in_stock &&
     stock > 0 &&
@@ -208,14 +232,19 @@ function ProductPage() {
               {added ? <Check size={15} /> : <ShoppingBag size={15} />}
               {added ? "Added to bag" : "Add to bag"}
             </button>
-            <a
-              href={whatsappOrderLink(product)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-full border border-primary/30 px-7 py-3.5 text-xs uppercase tracking-[0.22em] transition-colors hover:bg-primary hover:text-primary-foreground"
-            >
-              <MessageCircle size={15} /> Order on WhatsApp
-            </a>
+            {canOrderOnWhatsapp && (
+              <a
+                href={whatsappUrl(
+                  settings,
+                  `Hi ${settings.store_name}! I'd like to order ${product.name} (${inr(price)}).`,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-full border border-primary/30 px-7 py-3.5 text-xs uppercase tracking-[0.22em] transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                <MessageCircle size={15} /> Order on WhatsApp
+              </a>
+            )}
           </div>
 
           <ul className="mt-10 space-y-2 border-t border-border pt-6 text-sm text-muted-foreground">
@@ -263,6 +292,7 @@ function ReviewsSection({ product }: { product: Product }) {
   const [rating, setRating] = useState(5);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [reviewImages, setReviewImages] = useState<File[]>([]);
 
   const avg = useMemo(
     () => (reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0),
@@ -277,10 +307,24 @@ function ReviewsSection({ product }: { product: Product }) {
       return;
     }
     try {
+      const imageUrls: string[] = [];
+      for (const file of reviewImages.slice(0, 4)) {
+        if (!file.type.startsWith("image/")) throw new Error("Review images must be image files.");
+        if (file.size > 5 * 1024 * 1024) throw new Error("Review images must be 5MB or smaller.");
+        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `${user.id}/${product.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage
+          .from("review-images")
+          .upload(path, file, { cacheControl: "31536000", upsert: false });
+        if (error) throw error;
+        const { data } = supabase.storage.from("review-images").getPublicUrl(path);
+        imageUrls.push(data.publicUrl);
+      }
       await submit.mutateAsync({
         rating,
         title: title.trim(),
         body: body.trim(),
+        images: imageUrls,
         author_name:
           ((user.user_metadata as { full_name?: string } | undefined)?.full_name as string) ||
           user.email?.split("@")[0] ||
@@ -290,6 +334,7 @@ function ReviewsSection({ product }: { product: Product }) {
       setTitle("");
       setBody("");
       setRating(5);
+      setReviewImages([]);
       toast.success("Thanks for your review!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not submit review.");
@@ -327,6 +372,18 @@ function ReviewsSection({ product }: { product: Product }) {
               </div>
               {r.title && <p className="mt-2 font-display text-lg">{r.title}</p>}
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{r.body}</p>
+              {Array.isArray(r.images) && r.images.length > 0 && (
+                <div className="mt-3 grid grid-cols-4 gap-2">
+                  {r.images.map((url) => (
+                    <img key={url} src={url} alt="" className="aspect-square rounded-sm object-cover" />
+                  ))}
+                </div>
+              )}
+              {r.admin_reply && (
+                <p className="mt-3 rounded-sm bg-secondary/50 p-3 text-sm">
+                  <span className="font-medium">Superb Creations:</span> {r.admin_reply}
+                </p>
+              )}
               <p className="mt-3 text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">
                 {new Date(r.created_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}
               </p>
@@ -373,6 +430,18 @@ function ReviewsSection({ product }: { product: Product }) {
                 rows={4}
                 className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
               />
+              <label className="block">
+                <span className="mb-1 block text-xs uppercase tracking-[0.15em] text-muted-foreground">
+                  Review images
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => setReviewImages(Array.from(e.target.files ?? []).slice(0, 4))}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm"
+                />
+              </label>
               <button
                 type="submit"
                 disabled={submit.isPending}

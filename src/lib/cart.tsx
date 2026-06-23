@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { Product, Variant } from "@/lib/products";
 import { effectivePrice, variantLabel } from "@/lib/products";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 export type CartItem = {
   /** Unique cart key: `${product_id}::${variant_id ?? 'base'}` */
@@ -67,7 +68,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       subtotal,
       isOpen,
       setOpen,
-      addItem: (product, variant = null, qty = 1) =>
+      addItem: (product, variant = null, qty = 1) => {
+        trackAnalyticsEvent({
+          eventType: "add_to_cart",
+          productId: product.id,
+          metadata: { qty, variant: variant ? variantLabel(variant) : "base" },
+        });
         setItems((prev) => {
           const key = `${product.id}::${variant?.id ?? "base"}`;
           const found = prev.find((i) => i.id === key);
@@ -90,8 +96,20 @@ export function CartProvider({ children }: { children: ReactNode }) {
               qty,
             },
           ];
+        });
+      },
+      removeItem: (id) =>
+        setItems((prev) => {
+          const item = prev.find((i) => i.id === id);
+          if (item) {
+            trackAnalyticsEvent({
+              eventType: "remove_from_cart",
+              productId: item.product_id,
+              metadata: { qty: item.qty },
+            });
+          }
+          return prev.filter((i) => i.id !== id);
         }),
-      removeItem: (id) => setItems((prev) => prev.filter((i) => i.id !== id)),
       setQty: (id, qty) =>
         setItems((prev) =>
           qty <= 0

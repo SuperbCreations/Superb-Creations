@@ -1,13 +1,22 @@
 import { Link } from "@tanstack/react-router";
-import { ShoppingBag, MessageCircle, Star } from "lucide-react";
-import { type Product, whatsappOrderLink, inr } from "@/lib/products";
+import { ShoppingBag, MessageCircle, Star, Heart } from "lucide-react";
+import { type Product, inr } from "@/lib/products";
 import { useCart } from "@/lib/cart";
 import { useAllProductRatings } from "@/lib/reviews";
+import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
+import { useAuth } from "@/lib/auth";
+import { useToggleWishlist, useWishlist } from "@/lib/customer-engagement";
 
 export function ProductCard({ product }: { product: Product }) {
   const { addItem, setOpen } = useCart();
+  const { user } = useAuth();
   const { data: ratings } = useAllProductRatings();
+  const { data: settings } = useBusinessSettings();
+  const { data: wishlist = [] } = useWishlist(user?.id);
+  const toggleWishlist = useToggleWishlist(user?.id);
   const rating = ratings?.[product.id];
+  const canOrderOnWhatsapp = settings && settingBool(settings, "enable_whatsapp");
+  const wished = wishlist.some((item) => item.product_id === product.id);
 
   const lowStock = product.in_stock && product.stock > 0 && product.stock <= 5;
   const outOfStock = !product.in_stock || product.stock === 0;
@@ -39,6 +48,16 @@ export function ProductCard({ product }: { product: Product }) {
             Only {product.stock} left
           </span>
         ) : null}
+        {user && (
+          <button
+            type="button"
+            onClick={() => toggleWishlist.mutate({ productId: product.id, wished })}
+            aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
+            className="absolute left-3 bottom-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-background/90 text-foreground shadow-soft"
+          >
+            <Heart size={15} className={wished ? "fill-primary text-primary" : ""} />
+          </button>
+        )}
         <div className="absolute inset-x-3 bottom-3 flex translate-y-2 gap-2 opacity-0 transition-all duration-500 group-hover:translate-y-0 group-hover:opacity-100">
           <Link
             to="/product/$slug"
@@ -54,15 +73,20 @@ export function ProductCard({ product }: { product: Product }) {
           >
             <ShoppingBag size={14} /> {outOfStock ? "Sold out" : "Add"}
           </Link>
-          <a
-            href={whatsappOrderLink(product)}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Order on WhatsApp"
-            className="inline-flex items-center justify-center rounded-full border border-primary/40 bg-background px-3 py-2.5 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-          >
-            <MessageCircle size={14} />
-          </a>
+          {canOrderOnWhatsapp && (
+            <a
+              href={whatsappUrl(
+                settings,
+                `Hi ${settings.store_name}! I'd like to order ${product.name} (${inr(product.price)}).`,
+              )}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Order on WhatsApp"
+              className="inline-flex items-center justify-center rounded-full border border-primary/40 bg-background px-3 py-2.5 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              <MessageCircle size={14} />
+            </a>
+          )}
         </div>
       </div>
       <div className="mt-4 flex items-start justify-between gap-3">
