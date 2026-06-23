@@ -15,7 +15,11 @@ DROP POLICY IF EXISTS "Public can view business settings" ON public.business_set
 CREATE POLICY "Public can view business settings"
   ON public.business_settings
   FOR SELECT
-  USING (key <> 'brevo_api_key');
+  TO anon, authenticated
+  USING (
+    public.is_owner_admin(auth.uid())
+    OR key !~* '(api_key|secret|token|password|service_role|private)'
+  );
 
 CREATE TABLE IF NOT EXISTS public.email_templates (
   key text PRIMARY KEY,

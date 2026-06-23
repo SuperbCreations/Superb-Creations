@@ -136,14 +136,15 @@ export const settingNumber = (settings: BusinessSettings, key: BusinessSettingKe
   return Number.isFinite(n) ? n : Number(DEFAULT_BUSINESS_SETTINGS[key] || 0);
 };
 
+const SECRET_SETTING_PATTERN = /(api_key|secret|token|password|service_role|private)/i;
+
 export async function fetchBusinessSettings(): Promise<BusinessSettings> {
   const { data, error } = await supabase.from("business_settings").select("key,value");
   if (error) throw error;
 
   return (data ?? []).reduce(
     (settings, row) =>
-      row.key in settings &&
-      !["brevo_api_key", "shiprocket_api_key", "delhivery_api_key", "blue_dart_api_key"].includes(row.key)
+      row.key in settings && !SECRET_SETTING_PATTERN.test(row.key)
         ? { ...settings, [row.key]: row.value }
         : settings,
     { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings,
@@ -162,8 +163,7 @@ export function businessSettingRows(settings: Partial<BusinessSettings>) {
   return Object.entries(settings)
     .filter(
       ([key, value]) =>
-        !["brevo_api_key", "shiprocket_api_key", "delhivery_api_key", "blue_dart_api_key"].includes(key) ||
-        Boolean(value),
+        !SECRET_SETTING_PATTERN.test(key) || Boolean(value),
     )
     .map(([key, value]) => ({ key, value: value ?? "" }));
 }

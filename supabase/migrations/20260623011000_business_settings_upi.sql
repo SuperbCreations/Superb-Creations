@@ -31,7 +31,11 @@ DROP POLICY IF EXISTS "Public can view business settings" ON public.business_set
 CREATE POLICY "Public can view business settings"
   ON public.business_settings
   FOR SELECT
-  USING (true);
+  TO anon, authenticated
+  USING (
+    public.is_owner_admin(auth.uid())
+    OR key !~* '(api_key|secret|token|password|service_role|private)'
+  );
 
 DROP POLICY IF EXISTS "Owner can insert business settings" ON public.business_settings;
 CREATE POLICY "Owner can insert business settings"

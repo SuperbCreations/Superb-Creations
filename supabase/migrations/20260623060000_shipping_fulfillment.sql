@@ -22,7 +22,11 @@ DROP POLICY IF EXISTS "Public can view business settings" ON public.business_set
 CREATE POLICY "Public can view business settings"
   ON public.business_settings
   FOR SELECT
-  USING (key NOT IN ('brevo_api_key', 'shiprocket_api_key', 'delhivery_api_key', 'blue_dart_api_key'));
+  TO anon, authenticated
+  USING (
+    public.is_owner_admin(auth.uid())
+    OR key !~* '(api_key|secret|token|password|service_role|private)'
+  );
 
 ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS weight_grams integer NOT NULL DEFAULT 500,

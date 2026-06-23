@@ -89,6 +89,8 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.finalize_razorpay_payment(uuid, text, text);
+
 CREATE OR REPLACE FUNCTION public.finalize_razorpay_payment(
   p_order_id uuid,
   p_razorpay_order_id text,

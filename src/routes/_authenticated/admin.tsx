@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -109,8 +109,16 @@ const emptyDraft = (): Draft => ({
 
 function AdminPage() {
   const { isAdmin, loading, signOut, user } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] =
     useState<"products" | "lookbook" | "orders" | "analytics" | "reviews" | "customers" | "coupons" | "settings">("products");
+
+  useEffect(() => {
+    if (!loading && user && !isAdmin) {
+      toast.error("Admin access is restricted to the store owner.");
+      navigate({ to: "/account", replace: true });
+    }
+  }, [isAdmin, loading, navigate, user]);
 
   if (loading) {
     return (
