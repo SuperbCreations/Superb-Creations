@@ -25,7 +25,9 @@ VALUES
   ('facebook_url', 'https://www.facebook.com/share/1U22A7sHpi/?mibextid=wwXIfr'),
   ('youtube_url', 'https://youtube.com/@superb_creations?si=8gHDjFUhjRMpktts'),
   ('whatsapp_number', '917006202496')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value,
+    updated_at = now();
 
 DROP POLICY IF EXISTS "Public can view business settings" ON public.business_settings;
 CREATE POLICY "Public can view business settings"

@@ -32,6 +32,16 @@ function Contact() {
   const [error, setError] = useState<string | null>(null);
   const storeName = settings?.store_name || "Superb Creations";
   const canWhatsapp = settings && settingBool(settings, "enable_whatsapp");
+  const addressText = [
+    settings?.address,
+    settings?.city,
+    settings?.state,
+    settings?.country,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const hoursText = settings?.business_hours || "Mon-Sat, 10am-7pm";
+  const locationText = [addressText, hoursText].filter(Boolean).join(" · ");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,12 +99,7 @@ function Contact() {
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-blush">
               <MapPin size={16} />
             </span>
-            <span>
-              {[settings?.address, settings?.city, settings?.state, settings?.country]
-                .filter(Boolean)
-                .join(" · ")}{" "}
-              · {settings?.business_hours || "Mon-Sat, 10am-7pm"}
-            </span>
+            <span>{locationText}</span>
           </li>
         </ul>
 

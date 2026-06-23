@@ -5,7 +5,9 @@ VALUES
   ('support_email', 'superbcreations55@gmail.com'),
   ('business_email', 'superbcreations55@gmail.com'),
   ('brevo_contacts_enabled', 'false')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value,
+    updated_at = now();
 
 ALTER TABLE public.newsletter_subscribers
   ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
@@ -233,4 +235,11 @@ VALUES
   ('gift_card', 'Gift Card', 'Your {{store_name}} gift card', '<p>Your gift card {{gift_card_code}} has balance {{balance}}.</p>', 'Gift card {{gift_card_code}}.', 'transactional', '["gift_card_code","balance"]'::jsonb),
   ('loyalty_reward', 'Loyalty Reward', 'You earned loyalty points', '<p>You earned {{points}} points.</p>', 'You earned {{points}} points.', 'marketing', '["points"]'::jsonb),
   ('announcement', 'Announcement', '{{announcement_title}}', '<p>{{announcement_body}}</p>', '{{announcement_title}}', 'marketing', '["announcement_title","announcement_body"]'::jsonb)
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET name = EXCLUDED.name,
+    subject = EXCLUDED.subject,
+    body_html = EXCLUDED.body_html,
+    body_text = EXCLUDED.body_text,
+    category = EXCLUDED.category,
+    variables = EXCLUDED.variables,
+    updated_at = now();

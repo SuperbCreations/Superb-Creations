@@ -139,16 +139,24 @@ export const settingNumber = (settings: BusinessSettings, key: BusinessSettingKe
 const SECRET_SETTING_PATTERN = /(api_key|secret|token|password|service_role|private)/i;
 
 export async function fetchBusinessSettings(): Promise<BusinessSettings> {
-  const { data, error } = await supabase.from("business_settings").select("key,value");
-  if (error) throw error;
+  try {
+    const { data, error } = await supabase.from("business_settings").select("key,value");
+    if (error) {
+      console.warn("[business-settings] Falling back to bundled public defaults", error.message);
+      return { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings;
+    }
 
-  return (data ?? []).reduce(
-    (settings, row) =>
-      row.key in settings && !SECRET_SETTING_PATTERN.test(row.key)
-        ? { ...settings, [row.key]: row.value }
-        : settings,
-    { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings,
-  );
+    return (data ?? []).reduce(
+      (settings, row) =>
+        row.key in settings && !SECRET_SETTING_PATTERN.test(row.key)
+          ? { ...settings, [row.key]: row.value }
+          : settings,
+      { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings,
+    );
+  } catch (error) {
+    console.warn("[business-settings] Falling back to bundled public defaults", error);
+    return { ...DEFAULT_BUSINESS_SETTINGS } as BusinessSettings;
+  }
 }
 
 export function useBusinessSettings() {

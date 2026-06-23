@@ -88,7 +88,9 @@ VALUES
   ('email_primary_color', '#b07a86'),
   ('email_secondary_color', '#f7e8e8'),
   ('max_upload_size_mb', '5')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value,
+    updated_at = now();
 
 CREATE TABLE IF NOT EXISTS public.media_library (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

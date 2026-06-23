@@ -536,10 +536,10 @@ $$;
 
 DROP FUNCTION IF EXISTS public.finalize_razorpay_payment(uuid, text, text);
 
-CREATE FUNCTION public.finalize_razorpay_payment(
+CREATE OR REPLACE FUNCTION public.finalize_razorpay_payment(
   p_order_id uuid,
-  p_razorpay_payment_id text,
-  p_razorpay_order_id text
+  p_razorpay_order_id text,
+  p_razorpay_payment_id text
 )
 RETURNS jsonb
 LANGUAGE plpgsql

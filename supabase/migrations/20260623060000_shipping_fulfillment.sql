@@ -16,7 +16,9 @@ VALUES
   ('delhivery_api_key', ''),
   ('blue_dart_api_key', ''),
   ('india_post_customer_id', '')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value,
+    updated_at = now();
 
 DROP POLICY IF EXISTS "Public can view business settings" ON public.business_settings;
 CREATE POLICY "Public can view business settings"
@@ -142,13 +144,19 @@ VALUES
   ('delhivery', 'Delhivery', false, 'api'),
   ('india_post', 'India Post', false, 'api'),
   ('blue_dart', 'Blue Dart', false, 'api')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET name = EXCLUDED.name,
+    mode = EXCLUDED.mode;
 
 INSERT INTO public.shipping_methods (key, name, enabled, base_fee, express_fee, estimated_days)
 VALUES
   ('standard', 'Standard Shipping', true, 99, 0, '3-7'),
   ('express', 'Express Shipping', true, 99, 199, '1-3')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET name = EXCLUDED.name,
+    base_fee = EXCLUDED.base_fee,
+    express_fee = EXCLUDED.express_fee,
+    estimated_days = EXCLUDED.estimated_days;
 
 INSERT INTO public.email_templates (key, name, subject, body_html, body_text, category, variables)
 VALUES
@@ -156,4 +164,11 @@ VALUES
   ('order_out_for_delivery', 'Out For Delivery', 'Out for delivery — {{order_number}}', '<p>Your order {{order_number}} is out for delivery today. {{tracking_info}}</p>', 'Order out for delivery.', 'transactional', '["order_number","tracking_info"]'::jsonb),
   ('order_delivery_failed', 'Delivery Failed', 'Delivery needs attention — {{order_number}}', '<p>Delivery for {{order_number}} could not be completed. Please contact support if you need help.</p>', 'Delivery failed.', 'transactional', '["order_number"]'::jsonb),
   ('order_returned_to_origin', 'Returned To Origin', 'Returned to origin — {{order_number}}', '<p>Your order {{order_number}} is being returned to origin. We will contact you with next steps.</p>', 'Returned to origin.', 'transactional', '["order_number"]'::jsonb)
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE
+SET name = EXCLUDED.name,
+    subject = EXCLUDED.subject,
+    body_html = EXCLUDED.body_html,
+    body_text = EXCLUDED.body_text,
+    category = EXCLUDED.category,
+    variables = EXCLUDED.variables,
+    updated_at = now();
