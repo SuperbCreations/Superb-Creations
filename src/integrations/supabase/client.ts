@@ -2,14 +2,25 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+function normalizeSupabaseUrl(url: string) {
+  return url.trim().replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
+}
+
 function createSupabaseClient() {
   // Use import.meta.env for client-side (Vite build-time replacement)
   // Fall back to process.env only during SSR.
   const serverEnv = (globalThis as any).process?.env ?? {};
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || serverEnv.SUPABASE_URL;
+  const SUPABASE_URL = normalizeSupabaseUrl(
+    import.meta.env.VITE_SUPABASE_URL ||
+    serverEnv.SUPABASE_URL ||
+    serverEnv.VITE_SUPABASE_URL ||
+    "",
+  );
   const SUPABASE_PUBLISHABLE_KEY =
     import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    serverEnv.SUPABASE_PUBLISHABLE_KEY;
+    serverEnv.SUPABASE_PUBLISHABLE_KEY ||
+    serverEnv.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    serverEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     const missing = [

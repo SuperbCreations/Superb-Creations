@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { requireSupabaseAuthEnv } from "@/lib/env.server";
 
 export const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
 
@@ -8,13 +9,9 @@ export async function requireOwnerAdmin(accessToken: string) {
     throw new Error("Admin authentication is required.");
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!supabaseUrl || !publishableKey) {
-    throw new Error("Supabase auth is not configured.");
-  }
+  const { url, publishableKey } = requireSupabaseAuthEnv();
 
-  const supabase = createClient<Database>(supabaseUrl, publishableKey, {
+  const supabase = createClient<Database>(url, publishableKey, {
     global: {
       headers: {
         Authorization: `Bearer ${accessToken}`,

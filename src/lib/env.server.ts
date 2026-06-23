@@ -1,6 +1,6 @@
 const REQUIRED_SERVER_ENV = [
-  "SUPABASE_URL",
-  "SUPABASE_PUBLISHABLE_KEY",
+  "SUPABASE_URL_OR_ALIAS",
+  "SUPABASE_PUBLISHABLE_KEY_OR_ALIAS",
   "SUPABASE_SERVICE_ROLE_KEY",
   "RAZORPAY_KEY_ID",
   "RAZORPAY_KEY_SECRET",
@@ -19,11 +19,80 @@ let validated = false;
 
 export type ServerEnvKey = (typeof REQUIRED_SERVER_ENV)[number] | (typeof OPTIONAL_SERVER_ENV)[number];
 
-export function getServerEnv() {
+export function normalizeSupabaseUrl(url: string) {
+  return url.trim().replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
+}
+
+function firstEnv(...keys: string[]) {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return { key, value };
+  }
+  return { key: "", value: "" };
+}
+
+export function getSupabaseServerEnv() {
+  const url = firstEnv("SUPABASE_URL", "VITE_SUPABASE_URL");
+  const publishableKey = firstEnv(
+    "SUPABASE_PUBLISHABLE_KEY",
+    "VITE_SUPABASE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  );
+  const serviceRoleKey = firstEnv("SUPABASE_SERVICE_ROLE_KEY");
+
   return {
-    SUPABASE_URL: process.env.SUPABASE_URL || "",
-    SUPABASE_PUBLISHABLE_KEY: process.env.SUPABASE_PUBLISHABLE_KEY || "",
-    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+    url: normalizeSupabaseUrl(url.value),
+    urlSource: url.key,
+    publishableKey: publishableKey.value,
+    publishableKeySource: publishableKey.key,
+    serviceRoleKey: serviceRoleKey.value,
+    serviceRoleKeySource: serviceRoleKey.key,
+  };
+}
+
+export function requireSupabaseAuthEnv() {
+  const env = getSupabaseServerEnv();
+  const missing = [
+    ...(!env.url ? ["SUPABASE_URL or VITE_SUPABASE_URL"] : []),
+    ...(!env.publishableKey ? ["SUPABASE_PUBLISHABLE_KEY, VITE_SUPABASE_PUBLISHABLE_KEY, or NEXT_PUBLIC_SUPABASE_ANON_KEY"] : []),
+  ];
+  if (missing.length > 0) {
+    console.warn(`[env] Supabase auth env missing: ${missing.join(", ")}`);
+    throw new Error("Authentication service is not configured.");
+  }
+  if (env.urlSource !== "SUPABASE_URL" || env.publishableKeySource !== "SUPABASE_PUBLISHABLE_KEY") {
+    console.warn("[env] Supabase auth is using fallback env aliases", {
+      urlSource: env.urlSource,
+      publishableKeySource: env.publishableKeySource,
+    });
+  }
+  return { url: env.url, publishableKey: env.publishableKey };
+}
+
+export function requireSupabaseServiceRoleEnv() {
+  const env = getSupabaseServerEnv();
+  const missing = [
+    ...(!env.url ? ["SUPABASE_URL or VITE_SUPABASE_URL"] : []),
+    ...(!env.serviceRoleKey ? ["SUPABASE_SERVICE_ROLE_KEY"] : []),
+  ];
+  if (missing.length > 0) {
+    console.warn(`[env] Supabase service-role env missing: ${missing.join(", ")}`);
+    throw new Error("Server database service is not configured.");
+  }
+  if (env.urlSource !== "SUPABASE_URL") {
+    console.warn("[env] Supabase service-role client is using fallback URL alias", {
+      urlSource: env.urlSource,
+    });
+  }
+  return { url: env.url, serviceRoleKey: env.serviceRoleKey };
+}
+
+export function getServerEnv() {
+  const supabase = getSupabaseServerEnv();
+  return {
+    SUPABASE_URL_OR_ALIAS: supabase.url,
+    SUPABASE_PUBLISHABLE_KEY_OR_ALIAS: supabase.publishableKey,
+    SUPABASE_SERVICE_ROLE_KEY: supabase.serviceRoleKey,
     RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || "",
     RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || "",
     RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || "",

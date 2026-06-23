@@ -310,11 +310,11 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let userId: string | null = null;
     if (data.accessToken) {
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-      if (supabaseUrl && publishableKey) {
+      const { getSupabaseServerEnv } = await import("@/lib/env.server");
+      const authEnv = getSupabaseServerEnv();
+      if (authEnv.url && authEnv.publishableKey) {
         const { createClient } = await import("@supabase/supabase-js");
-        const userClient = createClient(supabaseUrl, publishableKey, {
+        const userClient = createClient(authEnv.url, authEnv.publishableKey, {
           auth: {
             storage: undefined,
             persistSession: false,
@@ -708,11 +708,11 @@ export const requestRefund = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let userId: string | null = null;
     if (data.accessToken) {
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-      if (supabaseUrl && publishableKey) {
+      const { getSupabaseServerEnv } = await import("@/lib/env.server");
+      const authEnv = getSupabaseServerEnv();
+      if (authEnv.url && authEnv.publishableKey) {
         const { createClient } = await import("@supabase/supabase-js");
-        const userClient = createClient(supabaseUrl, publishableKey, {
+        const userClient = createClient(authEnv.url, authEnv.publishableKey, {
           auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
         });
         const { data: userResult } = await userClient.auth.getUser(data.accessToken);
