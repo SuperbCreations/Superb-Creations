@@ -5,12 +5,12 @@ import type { Product } from "@/lib/products";
 
 const publicDb = publicSupabase as any;
 const db = supabase as any;
-const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inactive"];
+const VISIBLE_PRODUCT_STATUSES = ["active", "out_of_stock"];
 
 const visibleProducts = (query: any) =>
   query
     .eq("active", true)
-    .or(`product_status.is.null,product_status.not.in.(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
+    .or(`product_status.is.null,product_status.in.(${VISIBLE_PRODUCT_STATUSES.join(",")})`);
 
 export type BlogCategory = {
   id: string;

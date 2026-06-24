@@ -80,12 +80,12 @@ export const CATEGORIES = [
 
 export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inactive"];
+const VISIBLE_PRODUCT_STATUSES = ["active", "out_of_stock"];
 
 const visibleProductQuery = (query: any) =>
   query
     .eq("active", true)
-    .or(`product_status.is.null,product_status.not.in.(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
+    .or(`product_status.is.null,product_status.in.(${VISIBLE_PRODUCT_STATUSES.join(",")})`);
 
 async function fetchProducts(): Promise<Product[]> {
   const query = publicSupabase
@@ -94,7 +94,10 @@ async function fetchProducts(): Promise<Product[]> {
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
   const { data, error } = await visibleProductQuery(query);
-  if (error) throw error;
+  if (error) {
+    console.error("[products] visible products query failed", error);
+    throw error;
+  }
   return (data ?? []).map((product: any) => {
     const cover = [...(product.product_images ?? [])]
       .sort((a, b) => Number(b.is_cover) - Number(a.is_cover) || Number(a.sort_order || 0) - Number(b.sort_order || 0))[0];
@@ -119,7 +122,10 @@ export function useProduct(slug: string) {
         .select("*")
         .eq("slug", normalizedSlug);
       const { data, error } = await visibleProductQuery(query).maybeSingle();
-      if (error) throw error;
+      if (error) {
+        console.error("[products] product detail query failed", { slug, normalizedSlug, error });
+        throw error;
+      }
       return data as Product | null;
     },
   });

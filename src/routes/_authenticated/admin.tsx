@@ -1080,7 +1080,7 @@ function ProductsAdmin() {
           </button>
           <button
             onClick={() => {
-              const qty = Number(prompt("Adjust selected product stock by quantity. Use negative numbers to reduce.") || 0);
+              const qty = Number(prompt("Add / Reduce stock. Enter a positive number to add stock. Enter a negative number to reduce stock.") || 0);
               if (!qty) return;
               selectedProducts.forEach((productId) =>
                 adjustStock.mutate({ productId, quantity: qty, movementType: "bulk_adjustment", note: "Bulk adjustment" }),
@@ -1088,7 +1088,7 @@ function ProductsAdmin() {
             }}
             className="rounded-full border border-border px-3 py-1.5 text-xs"
           >
-            Adjust Stock
+            Add / Reduce Stock
           </button>
         </div>
       )}
@@ -1177,7 +1177,7 @@ function ProductsAdmin() {
                   </button>
                   <button
                     onClick={() => {
-                      const quantity = Number(prompt("Stock adjustment quantity. Use negative numbers to reduce.") || 0);
+                      const quantity = Number(prompt("Add / Reduce stock. Enter a positive number to add stock. Enter a negative number to reduce stock.") || 0);
                       if (!quantity) return;
                       const movementType = prompt("Movement type", quantity > 0 ? "restock" : "adjustment") || "adjustment";
                       const note = prompt("Note") || "";
@@ -1185,7 +1185,7 @@ function ProductsAdmin() {
                     }}
                     className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
                   >
-                    Adjust stock
+                    Add / Reduce stock
                   </button>
                   <button
                     onClick={() => duplicateProduct.mutate(p)}

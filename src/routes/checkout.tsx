@@ -942,12 +942,9 @@ function Checkout() {
                     {method === "upi" && <p className="text-muted-foreground">UPI ID: {upiId}</p>}
                     <p className="text-muted-foreground">Payment expires in {remainingLabel}</p>
                     {method === "upi" && (
-                      <a
-                        href={upiIntent}
-                        className="inline-flex rounded-full bg-primary px-5 py-2.5 text-xs uppercase tracking-[0.2em] text-primary-foreground"
-                      >
-                        Pay using any UPI App
-                      </a>
+                      <p className="rounded-sm bg-background/70 p-3 text-xs leading-relaxed text-muted-foreground">
+                        Scan the QR with any UPI app or copy the UPI ID manually.
+                      </p>
                     )}
                     <div className="flex flex-wrap gap-2">
                       {method === "upi" && (
@@ -967,27 +964,12 @@ function Checkout() {
                         Copy Amount
                       </button>
                     </div>
-                    {method === "upi" && <div className="flex flex-wrap gap-2">
-                      {[
-                        ["PhonePe", upiIntent],
-                        ["Google Pay", upiIntent],
-                        ["Paytm", upiIntent],
-                        ["BHIM", upiIntent],
-                      ].map(([label, href]) => (
-                        <a
-                          key={label}
-                          href={href}
-                          className="rounded-full border border-border px-3 py-1.5 text-xs"
-                        >
-                          Open {label}
-                        </a>
-                      ))}
-                    </div>}
                   </div>
                 </div>
                 <div className="mt-4 rounded-sm bg-background/70 p-3 text-xs leading-relaxed text-muted-foreground">
                   Pay the exact amount shown above, then paste the UTR or transaction reference.
-                  We will verify the payment before confirming your order.
+                  We will verify the payment before confirming your order. UPI payments are manually verified.
+                  For instant automatic confirmation, online Razorpay payment will be available soon.
                 </div>
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <input

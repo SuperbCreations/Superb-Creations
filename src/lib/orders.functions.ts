@@ -417,7 +417,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
         !product ||
         !product.active ||
         !product.in_stock ||
-        ["archived", "deleted", "draft", "hidden", "inactive"].includes(product.product_status || "")
+        !["", "active", "out_of_stock"].includes(product.product_status || "")
       ) {
         throw new Error("One or more items are no longer available.");
       }
