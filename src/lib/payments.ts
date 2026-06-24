@@ -5,8 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 const publicDb = publicSupabase as any;
 const db = supabase as any;
 
+export type PaymentMethodKey = "upi" | "razorpay" | "cod" | "bank_transfer";
+
 export type PaymentMethod = {
-  method_key: "upi" | "razorpay" | "cod" | "bank_transfer" | string;
+  method_key: PaymentMethodKey;
   display_name: string;
   description: string;
   instructions: string;
@@ -21,6 +23,36 @@ export type PaymentMethod = {
   public_details: Record<string, unknown>;
 };
 
+const checkoutMethodKeys = new Set<PaymentMethodKey>([
+  "upi",
+  "razorpay",
+  "cod",
+  "bank_transfer",
+]);
+
+function normalizePaymentMethod(row: any): PaymentMethod | null {
+  const methodKey = String(row?.method_key || "") as PaymentMethodKey;
+  if (!checkoutMethodKeys.has(methodKey)) return null;
+  return {
+    method_key: methodKey,
+    display_name: String(row.display_name || methodKey),
+    description: String(row.description || ""),
+    instructions: String(row.instructions || ""),
+    verification_time: String(row.verification_time || ""),
+    enabled: row.enabled === true,
+    min_order_amount: Number(row.min_order_amount || 0),
+    max_order_amount: row.max_order_amount == null ? null : Number(row.max_order_amount),
+    extra_fee: Number(row.extra_fee || 0),
+    sort_order: Number(row.sort_order || 0),
+    recommended: row.recommended === true,
+    provider: String(row.provider || "manual"),
+    public_details:
+      row.public_details && typeof row.public_details === "object"
+        ? row.public_details
+        : {},
+  };
+}
+
 export function usePaymentMethods() {
   return useQuery({
     queryKey: ["payment-methods"],
@@ -31,7 +63,9 @@ export function usePaymentMethods() {
         .eq("enabled", true)
         .order("sort_order");
       if (error) throw error;
-      return data ?? [];
+      return (data ?? [])
+        .map(normalizePaymentMethod)
+        .filter((method): method is PaymentMethod => Boolean(method));
     },
   });
 }

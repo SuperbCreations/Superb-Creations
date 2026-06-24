@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Bell, FileText, Gift, Heart, LogOut, MapPin, Package, Shield, Star, Ticket, Truck, User } from "lucide-react";
 import { toast } from "sonner";
@@ -55,6 +55,7 @@ function AccountPage() {
   const [profileDraft, setProfileDraft] = useState<Record<string, string>>({});
   const [addressDraft, setAddressDraft] = useState<Partial<CustomerAddress> | null>(null);
   const paymentMethodsByKey = new Map(paymentMethods.map((method) => [method.method_key, method]));
+  const defaultAddress = addresses.find((address) => address.is_default) ?? addresses[0];
 
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["my-orders", user?.id],
@@ -75,6 +76,16 @@ function AccountPage() {
     (user?.user_metadata as { full_name?: string } | undefined)?.full_name ||
     user?.email?.split("@")[0] ||
     "there";
+  const profileNeedsCompletion = !profile?.full_name || !profile?.phone;
+
+  useEffect(() => {
+    if (!user || profile || Object.keys(profileDraft).length > 0) return;
+    const metadata = (user.user_metadata || {}) as Record<string, string | undefined>;
+    setProfileDraft({
+      full_name: metadata.full_name || metadata.name || user.email?.split("@")[0] || "",
+      phone: "",
+    });
+  }, [profile, profileDraft, user]);
 
   const paymentLabel = (order: any) => {
     if (order.payment_status === "awaiting_payment") return "Payment Pending";
@@ -155,6 +166,11 @@ function AccountPage() {
       {tab === "profile" && (
         <section className="mt-6 max-w-2xl rounded-sm border border-border p-5">
           <h2 className="font-display text-2xl">Profile</h2>
+          {profileNeedsCompletion && (
+            <p className="mt-3 rounded-sm border border-border bg-secondary/30 p-3 text-sm text-muted-foreground">
+              Add your name and phone once for faster checkout and order updates.
+            </p>
+          )}
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             {[
               ["full_name", "Full name"],
@@ -171,11 +187,30 @@ function AccountPage() {
                 <input
                   type={key === "date_of_birth" ? "date" : "text"}
                   className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm"
-                  value={profileDraft[key] ?? profile?.[key] ?? ""}
+                  value={
+                    profileDraft[key] ??
+                    profile?.[key] ??
+                    (key === "full_name"
+                      ? ((user?.user_metadata as { full_name?: string; name?: string } | undefined)?.full_name ||
+                        (user?.user_metadata as { name?: string } | undefined)?.name ||
+                        user?.email?.split("@")[0] ||
+                        "")
+                      : "")
+                  }
                   onChange={(e) => setProfileDraft((d) => ({ ...d, [key]: e.target.value }))}
                 />
               </label>
             ))}
+          </div>
+          <div className="mt-5 rounded-sm border border-border bg-secondary/30 p-4 text-sm">
+            <p className="font-medium">Default address</p>
+            {defaultAddress ? (
+              <p className="mt-2 text-muted-foreground">
+                {defaultAddress.recipient_name} · {[defaultAddress.line1, defaultAddress.city, defaultAddress.state, defaultAddress.pincode].filter(Boolean).join(", ")}
+              </p>
+            ) : (
+              <p className="mt-2 text-muted-foreground">Optional. Add one in Addresses to speed up checkout.</p>
+            )}
           </div>
           <div className="mt-5 grid gap-2 text-sm">
             {[
@@ -257,6 +292,14 @@ function AccountPage() {
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button onClick={() => setAddressDraft(address)} className="rounded-full border border-border px-3 py-1.5 text-xs">Edit</button>
+                  {!address.is_default && (
+                    <button
+                      onClick={() => saveAddress.mutate({ ...address, is_default: true }, { onSuccess: () => toast.success("Default address updated.") })}
+                      className="rounded-full border border-border px-3 py-1.5 text-xs"
+                    >
+                      Set default
+                    </button>
+                  )}
                   <button onClick={() => deleteAddress.mutate(address.id)} className="rounded-full border border-border px-3 py-1.5 text-xs text-destructive">Delete</button>
                 </div>
               </div>

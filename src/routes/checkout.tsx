@@ -16,6 +16,7 @@ import {
 } from "@/lib/business-settings";
 import { useCustomerAddresses, useValidateCoupon } from "@/lib/customer-engagement";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { getShippingOptions } from "@/lib/shipping-settings";
 import {
   calculateShippingQuote,
   createCheckoutOrder,
@@ -23,7 +24,7 @@ import {
   submitUpiPaymentReference,
 } from "@/lib/orders.functions";
 import { createRazorpayOrder, markRazorpayPaymentFailed, verifyRazorpayPayment } from "@/lib/razorpay.functions";
-import { usePaymentMethods, type PaymentMethod } from "@/lib/payments";
+import { usePaymentMethods, type PaymentMethod, type PaymentMethodKey } from "@/lib/payments";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/checkout")({
@@ -55,6 +56,8 @@ type CheckoutOrderResult = {
   paymentDetails?: Record<string, unknown>;
 };
 
+type CheckoutMethod = "whatsapp" | PaymentMethodKey;
+
 declare global {
   interface Window {
     Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
@@ -66,11 +69,15 @@ function Checkout() {
   const { items, subtotal, clear } = useCart();
   const { user, session } = useAuth();
   const { settings } = useBusinessSettings();
-  const { data: paymentMethods = [] } = usePaymentMethods();
+  const {
+    data: paymentMethods = [],
+    isLoading: paymentMethodsLoading,
+    error: paymentMethodsError,
+  } = usePaymentMethods();
   const { data: addresses = [] } = useCustomerAddresses(user?.id);
   const validateCoupon = useValidateCoupon();
   const [form, setForm] = useState({ customer_name: "", phone: "", email: "", address: "" });
-  const [method, setMethod] = useState<"whatsapp" | "upi" | "razorpay" | "cod" | "bank_transfer">("upi");
+  const [method, setMethod] = useState<CheckoutMethod>("upi");
   const [couponCode, setCouponCode] = useState("");
   const [couponDiscount, setCouponDiscount] = useState(0);
   const [couponMessage, setCouponMessage] = useState("");
@@ -92,6 +99,7 @@ function Checkout() {
   const [expired, setExpired] = useState(false);
   const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [autofilledForUser, setAutofilledForUser] = useState<string | null>(null);
 
   const createOrder = useServerFn(createCheckoutOrder);
   const quoteShipping = useServerFn(calculateShippingQuote);
@@ -104,19 +112,42 @@ function Checkout() {
   const checkoutSettings = settings;
   const checkoutEnabled = settingBool(checkoutSettings, "enable_checkout");
   const whatsappEnabled = settingBool(checkoutSettings, "enable_whatsapp");
+  const codAvailable = settingBool(checkoutSettings, "cod_available");
+  const shippingOptions = useMemo(() => getShippingOptions(checkoutSettings), [checkoutSettings]);
+  const shippingUnavailable = shippingOptions.length === 0;
   const taxPercentage = settingNumber(checkoutSettings, "tax_percentage");
   const shipping = shippingQuote?.shipping ?? 0;
   const packagingCharge = shippingQuote?.packaging ?? 0;
   const tax = Math.round(((subtotal + shipping + packagingCharge) * taxPercentage) / 100);
-  const selectedPaymentMethod = paymentMethods.find((m) => m.method_key === method);
+  const availablePaymentMethods = useMemo(
+    () =>
+      paymentMethods.filter(
+        (paymentMethod) =>
+          paymentMethod.enabled &&
+          (paymentMethod.method_key !== "cod" || codAvailable),
+      ),
+    [codAvailable, paymentMethods],
+  );
+  const selectedPaymentMethod = availablePaymentMethods.find((m) => m.method_key === method);
   const paymentFee = method === "whatsapp" ? 0 : Number(selectedPaymentMethod?.extra_fee || 0);
   const total = Math.max(0, subtotal + shipping + packagingCharge + tax + paymentFee - couponDiscount);
-  const availablePaymentMethods = paymentMethods;
   const disabledReason = (m: PaymentMethod) => {
     if (subtotal < Number(m.min_order_amount || 0)) return `Minimum order ${inr(Number(m.min_order_amount || 0))}`;
     if (m.max_order_amount != null && subtotal > Number(m.max_order_amount)) return `Available up to ${inr(Number(m.max_order_amount))}`;
     return "";
   };
+  const firstSelectablePaymentMethod = useMemo(() => {
+    const isAllowedForSubtotal = (paymentMethod: PaymentMethod) => {
+      if (subtotal < Number(paymentMethod.min_order_amount || 0)) return false;
+      if (paymentMethod.max_order_amount != null && subtotal > Number(paymentMethod.max_order_amount)) return false;
+      return true;
+    };
+    return (
+      availablePaymentMethods.find((paymentMethod) => paymentMethod.recommended && isAllowedForSubtotal(paymentMethod)) ??
+      availablePaymentMethods.find(isAllowedForSubtotal) ??
+      availablePaymentMethods[0]
+    );
+  }, [availablePaymentMethods, subtotal]);
   const paymentIcon = (key: string) => {
     if (key === "razorpay") return <CreditCard size={20} className="mt-0.5 shrink-0" />;
     if (key === "cod") return <Banknote size={20} className="mt-0.5 shrink-0" />;
@@ -127,7 +158,27 @@ function Checkout() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const saveOrder = async (paymentMethod: "whatsapp" | "upi" | "razorpay" | "cod" | "bank_transfer") =>
+  const applyAddress = (address: (typeof addresses)[number]) => {
+    setForm((current) => ({
+      customer_name: address.recipient_name || current.customer_name,
+      phone: address.phone || current.phone,
+      email: current.email,
+      address:
+        [
+          address.line1,
+          address.line2,
+          address.city,
+          address.state,
+          address.country,
+          address.pincode,
+        ]
+          .filter(Boolean)
+          .join(", ") || current.address,
+    }));
+    setPincode(address.pincode || "");
+  };
+
+  const saveOrder = async (paymentMethod: CheckoutMethod) =>
     createOrder({
       data: {
         customer_name: form.customer_name,
@@ -149,12 +200,32 @@ function Checkout() {
     });
 
   useEffect(() => {
-    if (paymentMethods.length === 0) return;
-    if (method !== "whatsapp" && !paymentMethods.some((m) => m.method_key === method)) {
-      const recommended = paymentMethods.find((m) => m.recommended) ?? paymentMethods[0];
-      setMethod(recommended.method_key as typeof method);
+    if (paymentMethodsLoading) return;
+    if (method === "whatsapp" && whatsappEnabled) return;
+
+    const methodIsVisible = availablePaymentMethods.some((m) => m.method_key === method);
+    if (methodIsVisible) return;
+
+    if (firstSelectablePaymentMethod) {
+      setMethod(firstSelectablePaymentMethod.method_key);
+      return;
     }
-  }, [method, paymentMethods]);
+
+    if (whatsappEnabled) {
+      setMethod("whatsapp");
+    }
+  }, [availablePaymentMethods, firstSelectablePaymentMethod, method, paymentMethodsLoading, whatsappEnabled]);
+
+  useEffect(() => {
+    if (upiOrder && upiOrder.paymentMethod !== method) {
+      setUpiOrder(null);
+      setUpiQr("");
+      setUtr("");
+      setScreenshotUrl("");
+      setExpired(false);
+      setNow(Date.now());
+    }
+  }, [method, upiOrder]);
 
   useEffect(() => {
     if (items.length > 0) {
@@ -167,7 +238,55 @@ function Checkout() {
   }, [items.length, subtotal, user?.id]);
 
   useEffect(() => {
+    if (shippingOptions.length === 0) return;
+    if (!shippingOptions.some((option) => option.key === shippingMode)) {
+      setShippingMode(shippingOptions[0].key);
+    }
+  }, [shippingMode, shippingOptions]);
+
+  useEffect(() => {
+    if (!user || autofilledForUser === user.id) return;
+    const metadata = (user.user_metadata || {}) as Record<string, string | undefined>;
+    const defaultAddress =
+      addresses.find((address) => address.is_default) ??
+      addresses.find((address) => address.is_shipping) ??
+      addresses[0];
+    const addressText = defaultAddress
+      ? [
+          defaultAddress.line1,
+          defaultAddress.line2,
+          defaultAddress.city,
+          defaultAddress.state,
+          defaultAddress.country,
+          defaultAddress.pincode,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : "";
+
+    setForm((current) => ({
+      customer_name:
+        current.customer_name ||
+        metadata.full_name ||
+        metadata.name ||
+        user.email?.split("@")[0] ||
+        "",
+      phone: current.phone || defaultAddress?.phone || "",
+      email: current.email || user.email || "",
+      address: current.address || addressText,
+    }));
+    if (defaultAddress?.pincode) {
+      setPincode((current) => current || defaultAddress.pincode);
+    }
+    setAutofilledForUser(user.id);
+  }, [addresses, autofilledForUser, user]);
+
+  useEffect(() => {
     if (items.length === 0) {
+      setShippingQuote(null);
+      return;
+    }
+    if (shippingUnavailable) {
       setShippingQuote(null);
       return;
     }
@@ -188,28 +307,33 @@ function Checkout() {
       .then((quote) => {
         if (!cancelled) setShippingQuote(quote);
       })
-      .catch(() => {
-        if (!cancelled) setShippingQuote(null);
+      .catch((error) => {
+        if (!cancelled) {
+          setShippingQuote(null);
+          toast.error(error instanceof Error ? error.message : "Shipping could not be calculated.");
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [items, pincode, quoteShipping, shippingMode, subtotal]);
+  }, [items, pincode, quoteShipping, shippingMode, shippingUnavailable, subtotal]);
 
   const businessName = checkoutSettings.business_name || "Superb Creations";
-  const upiId = String(selectedPaymentMethod?.public_details?.upi_id || checkoutSettings.upi_id);
-  const bankDetails = selectedPaymentMethod?.public_details ?? {};
+  const activePaymentDetails = (upiOrder?.paymentDetails ?? selectedPaymentMethod?.public_details ?? {}) as Record<string, unknown>;
+  const upiId = String(activePaymentDetails.upi_id || "");
+  const upiPayeeName = String(activePaymentDetails.payee_name || activePaymentDetails.business_name || businessName);
+  const bankDetails = activePaymentDetails;
   const upiIntent = useMemo(() => {
-    if (!upiOrder) return "";
+    if (!upiOrder || !upiId) return "";
     const params = new URLSearchParams({
       pa: upiId,
-      pn: businessName,
+      pn: upiPayeeName,
       am: upiOrder.total.toFixed(2),
       cu: "INR",
       tn: `${checkoutSettings.payment_note || "Superb Creations order"} ${upiOrder.orderId}`,
     });
     return `upi://pay?${params.toString()}`;
-  }, [businessName, checkoutSettings.payment_note, upiId, upiOrder]);
+  }, [checkoutSettings.payment_note, upiId, upiOrder, upiPayeeName]);
 
   useEffect(() => {
     if (!upiIntent) {
@@ -288,6 +412,12 @@ function Checkout() {
     return `Hi ${checkoutSettings.store_name}! I'd like to place an order:\n\n${lines}\n\nSubtotal: ${inr(order.subtotal)}\nShipping: ${order.shipping === 0 ? "Free" : inr(order.shipping)}\nPackaging: ${inr(order.packaging ?? 0)}\nTax: ${inr(order.tax ?? 0)}\nTotal: ${inr(order.total)}\nEstimated delivery: ${order.estimatedDelivery || shippingQuote?.estimatedDelivery || "To be confirmed"}\n\nOrder ID: ${order.orderId}\nName: ${form.customer_name}\nPhone: ${form.phone}\nAddress: ${form.address}`;
   };
 
+  const selectedPaymentLabel =
+    method === "whatsapp"
+      ? "WhatsApp order"
+      : selectedPaymentMethod?.display_name || "selected payment method";
+  const paymentSelectionUnavailable =
+    !paymentMethodsLoading && !whatsappEnabled && availablePaymentMethods.length === 0;
   const submitLabel =
     method === "whatsapp"
       ? "Place order on WhatsApp"
@@ -299,7 +429,7 @@ function Checkout() {
             ? expired
               ? "Payment expired"
               : "Submit payment reference"
-            : `Generate payment for ${inr(total)}`;
+            : `Generate ${selectedPaymentLabel} for ${inr(total)}`;
 
   const applyCoupon = async () => {
     if (!couponCode.trim()) return;
@@ -332,6 +462,10 @@ function Checkout() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) return;
+    if (shippingUnavailable) {
+      toast.error("No shipping method is currently available. Please contact support before placing your order.");
+      return;
+    }
 
     const parsed = schema.safeParse(form);
     if (!parsed.success) {
@@ -356,12 +490,17 @@ function Checkout() {
         return;
       }
 
-      if (!selectedPaymentMethod && method !== "whatsapp") throw new Error("Selected payment method is unavailable.");
+      if (!selectedPaymentMethod && method !== "whatsapp") {
+        throw new Error("That payment option is not available right now. Please choose another method.");
+      }
       if (selectedPaymentMethod && subtotal < Number(selectedPaymentMethod.min_order_amount || 0)) {
         throw new Error(`${selectedPaymentMethod.display_name} requires a higher order value.`);
       }
       if (selectedPaymentMethod?.max_order_amount != null && subtotal > Number(selectedPaymentMethod.max_order_amount)) {
         throw new Error(`${selectedPaymentMethod.display_name} is not available for this order value.`);
+      }
+      if (method === "upi" && !String(selectedPaymentMethod?.public_details?.upi_id || "").trim()) {
+        throw new Error("UPI payment details are not configured yet. Please choose another payment method.");
       }
 
       if (method === "cod") {
@@ -590,22 +729,7 @@ function Checkout() {
                 onChange={(e) => {
                   const address = addresses.find((a) => a.id === e.target.value);
                   if (!address) return;
-                  setForm({
-                    customer_name: address.recipient_name,
-                    phone: address.phone,
-                    email: form.email,
-                    address: [
-                      address.line1,
-                      address.line2,
-                      address.city,
-                      address.state,
-                      address.country,
-                      address.pincode,
-                    ]
-                      .filter(Boolean)
-                      .join(", "),
-                  });
-                  setPincode(address.pincode || "");
+                  applyAddress(address);
                 }}
               >
                 <option value="">Use saved address</option>
@@ -653,22 +777,44 @@ function Checkout() {
                 onChange={(e) => setPincode(e.target.value.replace(/[^\dA-Za-z -]/g, "").slice(0, 12))}
                 className="rounded-md border border-border bg-background px-4 py-3 text-sm outline-none focus:border-primary"
               />
-              <select
-                value={shippingMode}
-                onChange={(e) => setShippingMode(e.target.value as "standard" | "express")}
-                className="rounded-md border border-border bg-background px-4 py-3 text-sm outline-none focus:border-primary"
-              >
-                <option value="standard">Standard shipping</option>
-                <option value="express">Express shipping</option>
-              </select>
+              {shippingOptions.length > 0 ? (
+                <select
+                  value={shippingMode}
+                  onChange={(e) => setShippingMode(e.target.value as "standard" | "express")}
+                  className="rounded-md border border-border bg-background px-4 py-3 text-sm outline-none focus:border-primary"
+                >
+                  {shippingOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="rounded-md border border-destructive/30 bg-background px-4 py-3 text-sm text-destructive sm:col-span-2">
+                  No shipping method is currently available. Please contact support before placing your order.
+                </p>
+              )}
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Estimated delivery: {shippingQuote?.estimatedDelivery || "Calculated after pincode"}.
+              Estimated delivery: {shippingQuote?.estimatedDelivery || shippingOptions.find((option) => option.key === shippingMode)?.estimate || "Calculated after pincode"}.
             </p>
           </div>
 
           <div>
             <h2 className="font-display text-2xl">Payment</h2>
+            {paymentMethodsLoading && (
+              <p className="mt-3 text-xs text-muted-foreground">Loading payment methods...</p>
+            )}
+            {paymentMethodsError && (
+              <p className="mt-3 text-xs text-destructive">
+                Payment methods could not be loaded. You can still place a WhatsApp order if it is available.
+              </p>
+            )}
+            {paymentSelectionUnavailable && (
+              <p className="mt-3 text-xs text-destructive">
+                No payment methods are currently available. Please contact support.
+              </p>
+            )}
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {whatsappEnabled && (
                 <button
@@ -779,6 +925,7 @@ function Checkout() {
                   <div className="space-y-3 text-sm">
                     <p className="font-medium">Pay exactly {inr(upiOrder.total)}</p>
                     <p className="text-muted-foreground">Order number: {upiOrder.orderId}</p>
+                    {method === "upi" && <p className="text-muted-foreground">Payee: {upiPayeeName}</p>}
                     {method === "upi" && <p className="text-muted-foreground">UPI ID: {upiId}</p>}
                     <p className="text-muted-foreground">Payment expires in {remainingLabel}</p>
                     {method === "upi" && (
@@ -942,7 +1089,7 @@ function Checkout() {
           </div>
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || paymentMethodsLoading || paymentSelectionUnavailable || shippingUnavailable}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-xs uppercase tracking-[0.22em] text-primary-foreground disabled:opacity-60"
           >
             {busy && <Loader2 size={15} className="animate-spin" />}

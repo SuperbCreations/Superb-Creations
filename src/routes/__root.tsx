@@ -18,6 +18,7 @@ import { WhatsappFab } from "@/components/site/WhatsappFab";
 import { CartSheet } from "@/components/site/CartSheet";
 import { GrowthPopups } from "@/components/site/GrowthPopups";
 import { SocialProof } from "@/components/site/SocialProof";
+import { SiteGuide } from "@/components/site/SiteGuide";
 import { CartProvider } from "@/lib/cart";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import {
@@ -183,6 +184,7 @@ function SiteFrame() {
       <Footer />
       <SocialProof />
       <GrowthPopups />
+      <SiteGuide />
       <WhatsappFab />
       <CartSheet />
     </>

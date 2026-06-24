@@ -147,9 +147,14 @@ function variantLabel(variant: Pick<VariantRow, "size" | "color">) {
 
 type CheckoutSettings = {
   flatShipping: number;
+  standardShippingEnabled: boolean;
+  standardDeliveryEstimate: string;
   freeShippingThreshold: number;
   packagingCharge: number;
+  expressShippingEnabled: boolean;
   expressShippingFee: number;
+  expressDeliveryEstimate: string;
+  codAvailable: boolean;
   taxPercentage: number;
   paymentTimeoutMinutes: number;
   estimatedDeliveryDays: string;
@@ -176,15 +181,27 @@ const numberSetting = (
   return Number.isFinite(n) && n >= min ? n : fallback;
 };
 
+const boolSetting = (rows: Map<string, string>, key: string, fallback: boolean) => {
+  const value = rows.get(key);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
+};
+
 async function loadCheckoutSettings(supabaseAdmin: any): Promise<CheckoutSettings> {
   const { data, error } = await supabaseAdmin
     .from("business_settings")
     .select("key,value")
     .in("key", [
       "flat_shipping",
+      "standard_shipping_enabled",
+      "standard_delivery_estimate",
       "free_shipping_threshold",
       "packaging_charge",
+      "express_shipping",
       "express_shipping_fee",
+      "express_delivery_estimate",
+      "cod_available",
       "tax_percentage",
       "payment_timeout_minutes",
       "estimated_delivery_days",
@@ -193,9 +210,15 @@ async function loadCheckoutSettings(supabaseAdmin: any): Promise<CheckoutSetting
   const rows = new Map<string, string>((data ?? []).map((row: any) => [row.key, row.value]));
   return {
     flatShipping: numberSetting(rows, "flat_shipping", 99),
+    standardShippingEnabled: boolSetting(rows, "standard_shipping_enabled", true),
+    standardDeliveryEstimate:
+      rows.get("standard_delivery_estimate") || rows.get("estimated_delivery") || "3-7 business days",
     freeShippingThreshold: numberSetting(rows, "free_shipping_threshold", 2500),
     packagingCharge: numberSetting(rows, "packaging_charge", 0),
+    expressShippingEnabled: boolSetting(rows, "express_shipping", false),
     expressShippingFee: numberSetting(rows, "express_shipping_fee", 199),
+    expressDeliveryEstimate: rows.get("express_delivery_estimate") || "1-3 business days",
+    codAvailable: boolSetting(rows, "cod_available", false),
     taxPercentage: numberSetting(rows, "tax_percentage", 0),
     paymentTimeoutMinutes: numberSetting(rows, "payment_timeout_minutes", 30, 1),
     estimatedDeliveryDays: rows.get("estimated_delivery_days") || "3-7",
@@ -237,15 +260,29 @@ function assertPaymentMethodAvailable(config: PaymentMethodConfig | null, subtot
   }
 }
 
+function resolveShippingMode(settings: CheckoutSettings, express?: boolean) {
+  if (express) {
+    if (!settings.expressShippingEnabled) throw new Error("Express shipping is currently unavailable.");
+    return "express";
+  }
+  if (settings.standardShippingEnabled) return "standard";
+  if (settings.expressShippingEnabled) return "express";
+  throw new Error("No shipping method is currently available. Please contact support.");
+}
+
 function calculateShipping(subtotal: number, settings: CheckoutSettings, express?: boolean) {
-  const shipping =
-    subtotal >= settings.freeShippingThreshold || subtotal === 0 ? 0 : settings.flatShipping;
-  const expressFee = express ? settings.expressShippingFee : 0;
+  const mode = resolveShippingMode(settings, express);
+  const baseFee = mode === "express" ? settings.expressShippingFee : settings.flatShipping;
+  const shipping = subtotal >= settings.freeShippingThreshold || subtotal === 0 ? 0 : baseFee;
   return {
-    shipping: shipping + expressFee,
+    shipping,
     packaging: settings.packagingCharge,
-    estimatedDelivery: express ? "1-3 business days" : `${settings.estimatedDeliveryDays} business days`,
+    estimatedDelivery:
+      mode === "express"
+        ? settings.expressDeliveryEstimate
+        : settings.standardDeliveryEstimate || `${settings.estimatedDeliveryDays} business days`,
     freeShippingEligible: subtotal >= settings.freeShippingThreshold,
+    mode,
   };
 }
 
@@ -261,6 +298,7 @@ function calculateTotals(subtotal: number, settings: CheckoutSettings, express?:
     total: subtotal + shipping + packaging + tax,
     estimatedDelivery: quote.estimatedDelivery,
     freeShippingEligible: quote.freeShippingEligible,
+    mode: quote.mode,
   };
 }
 
@@ -300,7 +338,7 @@ export const calculateShippingQuote = createServerFn({ method: "POST" })
       freeShippingEligible: quote.freeShippingEligible,
       deliveryAvailable: true,
       pincode: data.pincode || "",
-      mode: data.express || data.shipping_mode === "express" ? "express" : "standard",
+      mode: quote.mode,
     };
   });
 
@@ -397,9 +435,12 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
     });
 
     const subtotal = orderItems.reduce((sum, item) => sum + item.qty * item.price, 0);
+    const checkoutSettings = await loadCheckoutSettings(supabaseAdmin);
     const paymentConfig = await loadPaymentMethodConfig(supabaseAdmin, data.payment_method);
     assertPaymentMethodAvailable(paymentConfig, subtotal);
-    const checkoutSettings = await loadCheckoutSettings(supabaseAdmin);
+    if (data.payment_method === "cod" && !checkoutSettings.codAvailable) {
+      throw new Error("Cash on Delivery is currently unavailable.");
+    }
     const totals = calculateTotals(subtotal, checkoutSettings, data.express || data.shipping_mode === "express");
     const coupon = await applyCouponIfValid(
       supabaseAdmin,
@@ -451,7 +492,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
         payment_fee: paymentFee,
         discount_amount: coupon.discount,
         tax_amount: totals.tax,
-        shipping_mode: data.express || data.shipping_mode === "express" ? "express" : "standard",
+        shipping_mode: totals.mode,
         shipping_provider: "manual",
         payment_method: data.payment_method,
         payment_provider: paymentConfig?.provider || null,

@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Facebook, Instagram, Linkedin, Youtube, Globe } from "lucide-react";
 import { settingBool, useBusinessSettings } from "@/lib/business-settings";
+import { openSiteGuide } from "@/lib/site-guide";
 
 export function Footer() {
   const { settings } = useBusinessSettings();
@@ -68,6 +69,9 @@ export function Footer() {
             <Link to="/shipping-policy" className="hover:underline">Shipping</Link>
             <Link to="/return-refund-policy" className="hover:underline">Returns</Link>
             <Link to="/support-policy" className="hover:underline">Support</Link>
+            <button type="button" onClick={openSiteGuide} className="hover:underline">
+              Site guide
+            </button>
           </div>
         </div>
       </div>

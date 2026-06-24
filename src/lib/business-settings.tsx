@@ -88,9 +88,12 @@ export const DEFAULT_BUSINESS_SETTINGS = {
   lookbook_description:
     "Our spring lookbook celebrates ease — the kind of pieces you pull on without thinking, that quietly turn heads anyway.",
   flat_shipping: "99",
+  standard_shipping_enabled: "true",
+  standard_delivery_estimate: "3-7 business days",
   free_shipping_threshold: "2500",
   express_shipping: "false",
   express_shipping_fee: "199",
+  express_delivery_estimate: "1-3 business days",
   default_shipping_provider: "manual",
   shipping_mode: "manual",
   enable_shiprocket: "false",
