@@ -5,6 +5,12 @@ import type { Product } from "@/lib/products";
 
 const publicDb = publicSupabase as any;
 const db = supabase as any;
+const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inactive"];
+
+const visibleProducts = (query: any) =>
+  query
+    .eq("active", true)
+    .not("product_status", "in", `(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
 
 export type BlogCategory = {
   id: string;
@@ -288,13 +294,13 @@ export function useTrendingProducts(limit = 4) {
   return useQuery({
     queryKey: ["trending-products", limit],
     queryFn: async (): Promise<Product[]> => {
-      const { data, error } = await publicDb
+      const query = publicDb
         .from("products")
         .select("*")
-        .eq("active", true)
         .order("lifetime_sales", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(limit);
+      const { data, error } = await visibleProducts(query);
       if (error) throw error;
       return data ?? [];
     },
@@ -306,14 +312,14 @@ export function useSimilarProducts(product: Product | null | undefined, limit = 
     queryKey: ["similar-products", product?.id, limit],
     enabled: !!product,
     queryFn: async (): Promise<Product[]> => {
-      const { data, error } = await publicDb
+      const query = publicDb
         .from("products")
         .select("*")
-        .eq("active", true)
         .eq("category", product!.category)
         .neq("id", product!.id)
         .order("lifetime_sales", { ascending: false })
         .limit(limit);
+      const { data, error } = await visibleProducts(query);
       if (error) throw error;
       return data ?? [];
     },

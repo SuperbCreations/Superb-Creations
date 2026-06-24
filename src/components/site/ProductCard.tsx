@@ -51,7 +51,7 @@ export function ProductCard({ product }: { product: Product }) {
           </span>
         ) : lowStock ? (
           <span className="absolute right-3 top-3 rounded-full bg-primary/90 px-3 py-1 text-[0.65rem] uppercase tracking-[0.2em] text-primary-foreground">
-            Only {product.stock} left
+            Only {availableStock} left
           </span>
         ) : null}
         {user && (

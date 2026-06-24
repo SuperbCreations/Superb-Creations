@@ -80,13 +80,20 @@ export const CATEGORIES = [
 
 export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
+const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inactive"];
+
+const visibleProductQuery = (query: any) =>
+  query
+    .eq("active", true)
+    .not("product_status", "in", `(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
+
 async function fetchProducts(): Promise<Product[]> {
-  const { data, error } = await publicSupabase
+  const query = publicSupabase
     .from("products")
     .select("*, product_images(image_url,is_cover,sort_order)")
-    .eq("active", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
+  const { data, error } = await visibleProductQuery(query);
   if (error) throw error;
   return (data ?? []).map((product: any) => {
     const cover = [...(product.product_images ?? [])]
@@ -107,12 +114,11 @@ export function useProduct(slug: string) {
     queryKey: ["product", slug],
     queryFn: async () => {
       const normalizedSlug = decodeURIComponent(slug || "").trim().toLowerCase();
-      const { data, error } = await publicSupabase
+      const query = publicSupabase
         .from("products")
         .select("*")
-        .eq("slug", normalizedSlug)
-        .eq("active", true)
-        .maybeSingle();
+        .eq("slug", normalizedSlug);
+      const { data, error } = await visibleProductQuery(query).maybeSingle();
       if (error) throw error;
       return data as Product | null;
     },

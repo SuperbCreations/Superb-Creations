@@ -126,6 +126,7 @@ type ProductRow = {
   active: boolean;
   in_stock: boolean;
   stock: number;
+  product_status?: string;
   weight_grams?: number;
   free_shipping_eligible?: boolean;
   special_packaging?: boolean;
@@ -388,7 +389,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
 
     const { data: products, error: productsError } = await supabaseAdmin
       .from("products")
-      .select("id,slug,name,price,image_url,active,in_stock,stock,weight_grams,free_shipping_eligible,special_packaging,shipping_class")
+      .select("id,slug,name,price,image_url,active,in_stock,stock,product_status,weight_grams,free_shipping_eligible,special_packaging,shipping_class")
       .in("id", productIds);
     if (productsError) throw productsError;
 
@@ -408,7 +409,12 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
 
     const orderItems = cartItems.map((item) => {
       const product = productsById.get(item.product_id);
-      if (!product || !product.active || !product.in_stock) {
+      if (
+        !product ||
+        !product.active ||
+        !product.in_stock ||
+        ["archived", "deleted", "draft", "hidden", "inactive"].includes(product.product_status || "")
+      ) {
         throw new Error("One or more items are no longer available.");
       }
 

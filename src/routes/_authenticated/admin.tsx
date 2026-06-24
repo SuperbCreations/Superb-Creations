@@ -857,6 +857,7 @@ function ProductsAdmin() {
       if (!d.slug.trim() && !d.name.trim()) throw new Error("Product slug is required.");
       if (Number(d.price) <= 0) throw new Error("Product price must be greater than zero.");
       const status = d.product_status || (d.active ? "active" : "draft");
+      const storefrontVisible = ["active", "out_of_stock"].includes(status);
       const payload = {
         name: d.name,
         slug: d.slug || slugify(d.name),
@@ -865,7 +866,7 @@ function ProductsAdmin() {
         description: d.description,
         image_url: d.image_url,
         tag: d.tag || null,
-        active: status === "active" ? d.active : false,
+        active: storefrontVisible ? d.active : false,
         in_stock: status === "out_of_stock" ? false : d.in_stock,
         stock: Math.max(0, Math.round(d.stock || 0)),
         low_stock_threshold: Math.max(0, Math.round(d.low_stock_threshold || 0)),
@@ -942,15 +943,21 @@ function ProductsAdmin() {
         .filter("items", "cs", JSON.stringify([{ product_id: id }]));
       if (countError) throw countError;
       if ((count ?? 0) > 0) {
-        throw new Error("This product appears in orders. Archive it instead to preserve order history.");
+        const { error } = await supabase
+          .from("products")
+          .update({ active: false, product_status: "deleted" })
+          .eq("id", id);
+        if (error) throw error;
+        return "soft";
       }
       const { error } = await supabase.from("products").delete().eq("id", id);
       if (error) throw error;
+      return "hard";
     },
-    onSuccess: () => {
+    onSuccess: (mode) => {
       qc.invalidateQueries({ queryKey: ["admin-products"] });
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success("Product deleted.");
+      toast.success(mode === "soft" ? "Product marked as deleted." : "Product deleted.");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not delete product."),
   });
@@ -1107,9 +1114,14 @@ function ProductsAdmin() {
                     aria-label={`Select ${p.name}`}
                     className="mt-1"
                   />
-                  <p className="text-[0.65rem] uppercase tracking-[0.2em] text-muted-foreground">
-                    {p.category} {!p.active ? "· Archived" : !p.in_stock && "· Sold out"}
-                  </p>
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-[0.2em] text-muted-foreground">
+                      {p.category}
+                    </p>
+                    <p className="mt-1 inline-flex rounded-full border border-border px-2 py-0.5 text-[0.62rem] uppercase tracking-[0.16em] text-muted-foreground">
+                      {statusLabel(p.product_status ?? (p.active ? "active" : "draft"))}
+                    </p>
+                  </div>
                 </div>
                 <h3 className="mt-1 font-display text-lg">{p.name}</h3>
                 <p className="text-sm text-muted-foreground">
@@ -1154,11 +1166,11 @@ function ProductsAdmin() {
                     <Layers size={13} /> Variants
                   </button>
                   <button
-                    onClick={() => archive.mutate({ id: p.id, active: !p.active })}
+                    onClick={() => archive.mutate({ id: p.id, active: (p.product_status ?? "") === "archived" || !p.active })}
                     className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
                   >
-                    {p.active ? <Archive size={13} /> : <RotateCcw size={13} />}
-                    {p.active ? "Archive" : "Restore"}
+                    {(p.product_status ?? "") === "archived" || !p.active ? <RotateCcw size={13} /> : <Archive size={13} />}
+                    {(p.product_status ?? "") === "archived" || !p.active ? "Restore" : "Archive"}
                   </button>
                   <button
                     onClick={() => {
@@ -4658,7 +4670,20 @@ function ProductImagesManager({
       {isLoading ? (
         <p className="mt-3 text-xs text-muted-foreground">Loading images...</p>
       ) : images.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">No gallery images yet.</p>
+        <div className="mt-3 rounded-sm border border-dashed border-border p-3">
+          <p className="text-xs text-muted-foreground">
+            No gallery images yet. The current product photo is still used on the storefront.
+          </p>
+          {product.image_url && (
+            <button
+              type="button"
+              onClick={() => addImage.mutate(product.image_url)}
+              className="mt-3 rounded-full border border-border px-3 py-1.5 text-xs"
+            >
+              Add current photo to gallery
+            </button>
+          )}
+        </div>
       ) : (
         <div className="mt-4 space-y-3">
           {images.map((image) => (

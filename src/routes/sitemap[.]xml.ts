@@ -41,7 +41,11 @@ export const Route = createFileRoute("/sitemap.xml")({
               },
             },
           );
-          const { data } = await supabase.from("products").select("slug").eq("active", true);
+          const { data } = await supabase
+            .from("products")
+            .select("slug")
+            .eq("active", true)
+            .not("product_status", "in", "(archived,deleted,draft,hidden,inactive)");
           for (const p of data ?? []) {
             entries.push({ path: `/product/${p.slug}`, changefreq: "weekly", priority: "0.8" });
           }
