@@ -21,6 +21,7 @@ import {
   useSaveAddress,
   useSaveCustomerProfile,
   useSaveEmailPreferences,
+  useToggleWishlist,
   useWishlist,
   type CustomerAddress,
 } from "@/lib/customer-engagement";
@@ -44,6 +45,7 @@ function AccountPage() {
   const saveAddress = useSaveAddress(user?.id);
   const deleteAddress = useDeleteAddress(user?.id);
   const { data: wishlist = [] } = useWishlist(user?.id);
+  const toggleWishlist = useToggleWishlist(user?.id);
   const { data: loyalty } = useLoyalty(user?.id);
   const { data: referralCode } = useReferralCode(user?.id);
   const { data: notifications = [] } = useNotifications(user?.id);
@@ -365,16 +367,35 @@ function AccountPage() {
               <img src={item.products.image_url} alt={item.products.name} className="aspect-[4/5] w-full object-cover" />
               <p className="mt-3 font-display text-lg">{item.products.name}</p>
               <p className="text-sm text-muted-foreground">{inr(item.products.price)}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  addItem(item.products);
-                  setCartOpen(true);
-                }}
-                className="mt-3 rounded-full bg-primary px-4 py-2 text-xs uppercase tracking-[0.18em] text-primary-foreground"
-              >
-                Move to cart
-              </button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    addItem(item.products);
+                    setCartOpen(true);
+                  }}
+                  className="rounded-full bg-primary px-4 py-2 text-xs uppercase tracking-[0.18em] text-primary-foreground"
+                >
+                  Move to cart
+                </button>
+                <button
+                  type="button"
+                  disabled={toggleWishlist.isPending}
+                  onClick={() =>
+                    toggleWishlist.mutate(
+                      { productId: item.product_id, wished: true },
+                      {
+                        onSuccess: () => toast.success("Removed from wishlist."),
+                        onError: (error) =>
+                          toast.error(error instanceof Error ? error.message : "Wishlist could not be updated."),
+                      },
+                    )
+                  }
+                  className="rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em] disabled:opacity-60"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
           ))}
         </section>

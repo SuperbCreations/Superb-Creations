@@ -8,11 +8,15 @@ const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Sign in — Superb Creations" }] }),
+  validateSearch: (search: Record<string, unknown>) => ({
+    returnTo: typeof search.returnTo === "string" ? search.returnTo : "",
+  }),
   component: AuthPage,
 });
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { returnTo } = Route.useSearch();
   const { isAdmin, loading, user } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -20,11 +24,28 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const userIsAdmin = user?.email?.toLowerCase() === OWNER_ADMIN_EMAIL || isAdmin;
+  const safeReturnTo = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const authRedirectUrl = `${origin}/auth${safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : ""}`;
+  const navigateAfterAuth = (email?: string | null) => {
+    if (safeReturnTo) {
+      navigate({ to: safeReturnTo as any, replace: true });
+      return;
+    }
+    navigate({
+      to: email?.toLowerCase() === OWNER_ADMIN_EMAIL ? "/admin" : "/account",
+      replace: true,
+    });
+  };
 
   useEffect(() => {
     if (loading || !user) return;
+    if (safeReturnTo) {
+      navigate({ to: safeReturnTo as any, replace: true });
+      return;
+    }
     navigate({ to: userIsAdmin ? "/admin" : "/account", replace: true });
-  }, [loading, navigate, user, userIsAdmin]);
+  }, [loading, navigate, safeReturnTo, user, userIsAdmin]);
 
   const handleEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,23 +56,19 @@ function AuthPage() {
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth`,
+            emailRedirectTo: authRedirectUrl,
             data: { full_name: name },
           },
         });
         if (error) throw error;
         toast.success("Account created. You're signed in.");
         const signedUpEmail = data.user?.email ?? email;
-        navigate({
-          to: signedUpEmail.toLowerCase() === OWNER_ADMIN_EMAIL ? "/admin" : "/account",
-        });
+        navigateAfterAuth(signedUpEmail);
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         const signedInEmail = data.user?.email ?? email;
-        navigate({
-          to: signedInEmail.toLowerCase() === OWNER_ADMIN_EMAIL ? "/admin" : "/account",
-        });
+        navigateAfterAuth(signedInEmail);
         toast.success("Welcome back.");
         return;
       }
@@ -67,7 +84,7 @@ function AuthPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth`,
+        redirectTo: authRedirectUrl,
       },
     });
     if (error) {

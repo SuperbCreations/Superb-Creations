@@ -353,6 +353,9 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let userId: string | null = null;
+    if (!data.accessToken) {
+      throw new Error("Please sign in to continue checkout.");
+    }
     if (data.accessToken) {
       const { getSupabaseServerEnv } = await import("@/lib/env.server");
       const authEnv = getSupabaseServerEnv();
@@ -368,6 +371,9 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
         const { data: userResult } = await userClient.auth.getUser(data.accessToken);
         userId = userResult.user?.id ?? null;
       }
+    }
+    if (!userId) {
+      throw new Error("Please sign in to continue checkout.");
     }
 
     const normalizedItems = new Map<

@@ -52,6 +52,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queryClient.removeQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: BUSINESS_SETTINGS_QUERY_KEY });
     };
+    const triggerWelcomeEmail = (sess: Session | null) => {
+      if (!sess?.access_token || !sess.user?.id) return;
+      ensureWelcomeEmail({ data: { accessToken: sess.access_token } }).then((result) => {
+        if (!result?.ok && !result?.skipped) {
+          console.warn("[welcome-email] background send did not complete", result);
+        }
+      }).catch((error) => {
+        console.warn("[welcome-email] background check failed", error);
+      });
+    };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess);
@@ -60,6 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Defer Supabase calls to avoid deadlocks inside the callback.
       setTimeout(() => {
         resolveRole(sess?.user?.email);
+        triggerWelcomeEmail(sess);
       }, 0);
     });
 
@@ -67,18 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session);
       setUser(data.session?.user ?? null);
       resolveRole(data.session?.user?.email);
+      triggerWelcomeEmail(data.session);
       setLoading(false);
     });
 
     return () => sub.subscription.unsubscribe();
-  }, [queryClient]);
-
-  useEffect(() => {
-    if (!session?.access_token || !user?.id) return;
-    ensureWelcomeEmail({ data: { accessToken: session.access_token } }).catch((error) => {
-      console.warn("[welcome-email] background check failed", error);
-    });
-  }, [ensureWelcomeEmail, session?.access_token, user?.id]);
+  }, [ensureWelcomeEmail, queryClient]);
 
   const signOut = async () => {
     await supabase.auth.signOut({ scope: "local" });

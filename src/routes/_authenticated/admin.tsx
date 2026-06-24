@@ -2410,7 +2410,12 @@ function EmailOpsPanel({
             {logs.map((log: any) => (
               <div key={log.id} className="rounded-sm border border-border p-3 text-xs">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium">{log.recipient}</p>
+                  <p className="font-medium">
+                    {log.recipient}
+                    {log.template_key === "welcome" && log.status !== "sent" && (
+                      <span className="ml-2 text-destructive">Welcome email issue</span>
+                    )}
+                  </p>
                   <span className="uppercase tracking-[0.14em] text-muted-foreground">{log.status}</span>
                 </div>
                 <p className="mt-1 text-muted-foreground">{log.template_key || "custom"} · {log.subject}</p>

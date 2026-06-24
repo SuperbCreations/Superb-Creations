@@ -67,7 +67,7 @@ declare global {
 function Checkout() {
   const navigate = useNavigate();
   const { items, subtotal, clear } = useCart();
-  const { user, session } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const { settings } = useBusinessSettings();
   const {
     data: paymentMethods = [],
@@ -108,12 +108,21 @@ function Checkout() {
   const createRazorpay = useServerFn(createRazorpayOrder);
   const verifyRazorpay = useServerFn(verifyRazorpayPayment);
   const failRazorpay = useServerFn(markRazorpayPaymentFailed);
+  const redirectToAuth = () => {
+    toast.error("Please sign in to continue checkout.");
+    navigate({ to: "/auth", search: { returnTo: "/checkout" } as never });
+  };
 
   useEffect(() => {
     if (paymentMethodsError) {
       console.error("[checkout] payment methods could not be loaded", paymentMethodsError);
     }
   }, [paymentMethodsError]);
+
+  useEffect(() => {
+    if (authLoading || user || items.length === 0) return;
+    navigate({ to: "/auth", search: { returnTo: "/checkout" } as never, replace: true });
+  }, [authLoading, items.length, navigate, user]);
 
   const checkoutSettings = settings;
   const checkoutEnabled = settingBool(checkoutSettings, "enable_checkout");
@@ -468,6 +477,10 @@ function Checkout() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) return;
+    if (!user || !session?.access_token) {
+      redirectToAuth();
+      return;
+    }
     if (shippingUnavailable) {
       toast.error("No shipping method is currently available. Please contact support before placing your order.");
       return;
@@ -691,6 +704,22 @@ function Checkout() {
           className="mt-6 inline-block rounded-full bg-primary px-7 py-3 text-xs uppercase tracking-[0.22em] text-primary-foreground"
         >
           Start shopping
+        </Link>
+      </section>
+    );
+  }
+
+  if (authLoading || !user) {
+    return (
+      <section className="container-boutique py-24 text-center">
+        <h1 className="font-display text-4xl">Checkout</h1>
+        <p className="mt-4 text-muted-foreground">Please sign in to continue checkout.</p>
+        <Link
+          to="/auth"
+          search={{ returnTo: "/checkout" } as never}
+          className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-7 py-3 text-xs uppercase tracking-[0.22em] text-primary-foreground"
+        >
+          <LogIn size={14} /> Sign in
         </Link>
       </section>
     );

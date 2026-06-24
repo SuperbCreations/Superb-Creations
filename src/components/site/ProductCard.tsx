@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ShoppingBag, MessageCircle, Star, Heart } from "lucide-react";
+import { toast } from "sonner";
 import { type Product, inr, useAllVariants } from "@/lib/products";
 import { useCart } from "@/lib/cart";
 import { useAllProductRatings } from "@/lib/reviews";
@@ -60,16 +61,26 @@ export function ProductCard({ product }: { product: Product }) {
             Only {availableStock} left
           </span>
         ) : null}
-        {user && (
-          <button
-            type="button"
-            onClick={() => toggleWishlist.mutate({ productId: product.id, wished })}
-            aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
-            className="absolute left-3 bottom-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-background/90 text-foreground shadow-soft"
-          >
-            <Heart size={15} className={wished ? "fill-primary text-primary" : ""} />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            if (!user) {
+              toast.error("Please sign in to use wishlist.");
+              return;
+            }
+            toggleWishlist.mutate(
+              { productId: product.id, wished },
+              {
+                onError: (error) =>
+                  toast.error(error instanceof Error ? error.message : "Wishlist could not be updated."),
+              },
+            );
+          }}
+          aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
+          className="absolute left-3 bottom-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-background/90 text-foreground shadow-soft"
+        >
+          <Heart size={15} className={wished ? "fill-primary text-primary" : ""} />
+        </button>
         <div className="absolute inset-x-3 bottom-3 flex translate-y-2 gap-2 opacity-0 transition-all duration-500 group-hover:translate-y-0 group-hover:opacity-100">
           <Link
             to="/product/$slug"
