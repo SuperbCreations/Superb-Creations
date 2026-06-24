@@ -33,7 +33,10 @@ export function useReviews(productId: string | undefined) {
         .eq("product_id", productId!)
         .eq("approved", true)
         .order("created_at", { ascending: false });
-      if (error) throw error;
+      if (error) {
+        console.error("[reviews] public reviews query failed", { productId, error });
+        return [];
+      }
       return (data ?? []) as Review[];
     },
   });

@@ -143,7 +143,10 @@ export function useVariants(productId: string | undefined) {
         .eq("active", true)
         .order("sort_order")
         .order("size");
-      if (error) throw error;
+      if (error) {
+        console.error("[products] product_variants query failed", { productId, error });
+        return [];
+      }
       return (data ?? []) as Variant[];
     },
   });

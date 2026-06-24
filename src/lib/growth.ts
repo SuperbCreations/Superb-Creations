@@ -245,7 +245,10 @@ export function useMarketingPopups(pathname: string) {
         .select("*")
         .eq("active", true)
         .order("sort_order");
-      if (error) throw error;
+      if (error) {
+        console.error("[growth] public marketing_popups query failed", { pathname, error });
+        return [];
+      }
       return (data ?? []).filter((popup: MarketingPopup) => {
         if (!popup.target_pages?.length) return true;
         return popup.target_pages.includes(pathname) || popup.target_pages.includes("*");
@@ -320,7 +323,14 @@ export function useSimilarProducts(product: Product | null | undefined, limit = 
         .order("lifetime_sales", { ascending: false })
         .limit(limit);
       const { data, error } = await visibleProducts(query);
-      if (error) throw error;
+      if (error) {
+        console.error("[growth] similar products query failed", {
+          productId: product!.id,
+          category: product!.category,
+          error,
+        });
+        return [];
+      }
       return data ?? [];
     },
   });

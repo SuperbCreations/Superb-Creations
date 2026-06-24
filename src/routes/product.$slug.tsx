@@ -359,7 +359,7 @@ function ProductPage() {
         </div>
       </section>
 
-      <ReviewsSection product={product} />
+      <ReviewsSection product={product} similarProducts={similarProducts ?? []} />
 
       {related.length > 0 && (
         <section className="container-boutique py-12 md:py-16">
@@ -389,7 +389,13 @@ function Stars({ value, size = 14 }: { value: number; size?: number }) {
   );
 }
 
-function ReviewsSection({ product }: { product: Product }) {
+function ReviewsSection({
+  product,
+  similarProducts = [],
+}: {
+  product: Product;
+  similarProducts?: Product[];
+}) {
   const { user } = useAuth();
   const { data: reviews = [] } = useReviews(product.id);
   const submit = useSubmitReview(product.id);
