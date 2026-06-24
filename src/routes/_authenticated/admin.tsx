@@ -29,7 +29,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { CATEGORIES, inr, type Product, type Variant } from "@/lib/products";
+import { CATEGORIES, inr, type Product, type ProductImage, type Variant } from "@/lib/products";
 import type { LookbookItem } from "@/lib/lookbook";
 import {
   DEFAULT_BUSINESS_SETTINGS,
@@ -853,6 +853,10 @@ function ProductsAdmin() {
 
   const save = useMutation({
     mutationFn: async (d: Draft) => {
+      if (!d.name.trim()) throw new Error("Product name is required.");
+      if (!d.slug.trim() && !d.name.trim()) throw new Error("Product slug is required.");
+      if (Number(d.price) <= 0) throw new Error("Product price must be greater than zero.");
+      const status = d.product_status || (d.active ? "active" : "draft");
       const payload = {
         name: d.name,
         slug: d.slug || slugify(d.name),
@@ -861,11 +865,11 @@ function ProductsAdmin() {
         description: d.description,
         image_url: d.image_url,
         tag: d.tag || null,
-        active: d.active,
-        in_stock: d.in_stock,
+        active: status === "active" ? d.active : false,
+        in_stock: status === "out_of_stock" ? false : d.in_stock,
         stock: Math.max(0, Math.round(d.stock || 0)),
         low_stock_threshold: Math.max(0, Math.round(d.low_stock_threshold || 0)),
-        product_status: d.product_status,
+        product_status: status,
         sort_order: d.sort_order,
         weight_grams: Math.max(0, Math.round(d.weight_grams || 0)),
         length_cm: Math.max(0, Number(d.length_cm || 0)),
@@ -887,6 +891,7 @@ function ProductsAdmin() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-products"] });
       qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["product", draft?.slug] });
       setDraft(null);
       toast.success("Product saved.");
     },
@@ -895,7 +900,10 @@ function ProductsAdmin() {
 
   const archive = useMutation({
     mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
-      const { error } = await supabase.from("products").update({ active }).eq("id", id);
+      const { error } = await supabase
+        .from("products")
+        .update({ active, product_status: active ? "active" : "archived" })
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: (_, variables) => {
@@ -904,6 +912,47 @@ function ProductsAdmin() {
       toast.success(variables.active ? "Product restored." : "Product archived.");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not update product."),
+  });
+
+  const duplicateProduct = useMutation({
+    mutationFn: async (product: Product) => {
+      const { id: _id, slug: _slug, name, ...rest } = product as any;
+      const nextSlug = `${slugify(name)}-copy-${Date.now().toString(36)}`;
+      const { error } = await supabase.from("products").insert({
+        ...rest,
+        name: `${name} Copy`,
+        slug: nextSlug,
+        active: false,
+        product_status: "draft",
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-products"] });
+      toast.success("Product duplicated as draft.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not duplicate product."),
+  });
+
+  const deleteProduct = useMutation({
+    mutationFn: async (id: string) => {
+      const { count, error: countError } = await supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .filter("items", "cs", JSON.stringify([{ product_id: id }]));
+      if (countError) throw countError;
+      if ((count ?? 0) > 0) {
+        throw new Error("This product appears in orders. Archive it instead to preserve order history.");
+      }
+      const { error } = await supabase.from("products").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-products"] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success("Product deleted.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not delete product."),
   });
 
   const adjustStock = useMutation({
@@ -1123,6 +1172,30 @@ function ProductsAdmin() {
                   >
                     Adjust stock
                   </button>
+                  <button
+                    onClick={() => duplicateProduct.mutate(p)}
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
+                  >
+                    Duplicate
+                  </button>
+                  <a
+                    href={`/product/${p.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs"
+                  >
+                    Preview
+                  </a>
+                  <button
+                    onClick={() => {
+                      if (confirm("Delete permanently? This is only allowed when no orders reference the product.")) {
+                        deleteProduct.mutate(p.id);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs text-destructive"
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
                 </div>
               </div>
             </div>
@@ -1313,6 +1386,13 @@ function ProductsAdmin() {
                   </label>
                 </div>
               </Field>
+
+              {draft.id && (
+                <ProductImagesManager
+                  product={draft as Product}
+                  onCoverChange={(url) => setDraft({ ...draft, image_url: url })}
+                />
+              )}
 
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -4442,6 +4522,192 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function ProductImagesManager({
+  product,
+  onCoverChange,
+}: {
+  product: Product;
+  onCoverChange: (url: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const [manualUrl, setManualUrl] = useState("");
+
+  const { data: images = [], isLoading } = useQuery({
+    queryKey: ["admin-product-images", product.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_images")
+        .select("*")
+        .eq("product_id", product.id)
+        .order("is_cover", { ascending: false })
+        .order("sort_order", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as ProductImage[];
+    },
+  });
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["admin-product-images", product.id] });
+    qc.invalidateQueries({ queryKey: ["product-images", product.id] });
+    qc.invalidateQueries({ queryKey: ["admin-products"] });
+    qc.invalidateQueries({ queryKey: ["products"] });
+  };
+
+  const addImage = useMutation({
+    mutationFn: async (imageUrl: string) => {
+      const firstImage = images.length === 0;
+      const { error } = await supabase.from("product_images").insert({
+        product_id: product.id,
+        image_url: imageUrl,
+        alt_text: product.name,
+        sort_order: images.length,
+        is_cover: firstImage,
+      });
+      if (error) throw error;
+      if (firstImage) onCoverChange(imageUrl);
+    },
+    onSuccess: () => {
+      setManualUrl("");
+      refresh();
+      toast.success("Image added.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not add image."),
+  });
+
+  const updateImage = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Partial<ProductImage> }) => {
+      const { error } = await supabase.from("product_images").update(patch).eq("id", id);
+      if (error) throw error;
+      if (patch.is_cover && patch.image_url) onCoverChange(patch.image_url);
+    },
+    onSuccess: () => {
+      refresh();
+      toast.success("Image updated.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not update image."),
+  });
+
+  const removeImage = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("product_images").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      refresh();
+      toast.success("Image removed.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not remove image."),
+  });
+
+  const uploadGalleryImage = async (file: File) => {
+    setUploading(true);
+    try {
+      if (!file.type.startsWith("image/")) throw new Error("Please upload an image file.");
+      if (file.size > 5 * 1024 * 1024) throw new Error("Image must be 5MB or smaller.");
+      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `products/${product.id}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage
+        .from("product-images")
+        .upload(path, file, { cacheControl: "31536000", upsert: false });
+      if (error) throw error;
+      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+      await addImage.mutateAsync(data.publicUrl);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-sm border border-border bg-secondary/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-medium">Product gallery</p>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.18em]">
+          {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+          {uploading ? "Uploading..." : "Upload"}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadGalleryImage(file);
+            }}
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <input
+          className={inputCls}
+          placeholder="Paste image URL"
+          value={manualUrl}
+          onChange={(e) => setManualUrl(e.target.value)}
+        />
+        <button
+          type="button"
+          disabled={!manualUrl.trim()}
+          onClick={() => addImage.mutate(manualUrl.trim())}
+          className="rounded-full border border-border px-4 py-2 text-xs uppercase tracking-[0.16em] disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
+      {isLoading ? (
+        <p className="mt-3 text-xs text-muted-foreground">Loading images...</p>
+      ) : images.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">No gallery images yet.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {images.map((image) => (
+            <div key={image.id} className="grid gap-3 rounded-sm border border-border bg-background p-3 sm:grid-cols-[64px_1fr]">
+              <img src={image.image_url} alt={image.alt_text || product.name} className="h-20 w-16 object-cover" />
+              <div className="space-y-2">
+                <input
+                  className={inputCls}
+                  value={image.alt_text}
+                  placeholder="Alt text"
+                  onChange={(e) => updateImage.mutate({ id: image.id, patch: { alt_text: e.target.value } })}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="number"
+                    className="w-24 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    value={image.sort_order}
+                    onChange={(e) => updateImage.mutate({ id: image.id, patch: { sort_order: Number(e.target.value) } })}
+                  />
+                  <button
+                    type="button"
+                    disabled={image.is_cover}
+                    onClick={() =>
+                      updateImage.mutate({
+                        id: image.id,
+                        patch: { is_cover: true, image_url: image.image_url },
+                      })
+                    }
+                    className="rounded-full border border-border px-3 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    {image.is_cover ? "Cover" : "Set cover"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeImage.mutate(image.id)}
+                    className="rounded-full border border-border px-3 py-1.5 text-xs text-destructive"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // =====================================================================
 // VARIANT EDITOR
 // =====================================================================
@@ -4454,6 +4720,7 @@ type VariantDraft = {
   price: string; // optional override, blank = use product price
   stock: number;
   sort_order: number;
+  active: boolean;
 };
 
 const emptyVariantDraft = (): VariantDraft => ({
@@ -4463,6 +4730,7 @@ const emptyVariantDraft = (): VariantDraft => ({
   price: "",
   stock: 0,
   sort_order: 0,
+  active: true,
 });
 
 function VariantsEditor({ product, onClose }: { product: Product; onClose: () => void }) {
@@ -4494,6 +4762,8 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
         price: d.price.trim() === "" ? null : Math.max(0, Math.round(Number(d.price))),
         stock: Math.max(0, Math.round(d.stock || 0)),
         sort_order: d.sort_order,
+        active: d.active,
+        archived_at: d.active ? null : new Date().toISOString(),
       };
       if (d.id) {
         const { error } = await supabase
@@ -4517,13 +4787,16 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("product_variants").delete().eq("id", id);
+      const { error } = await supabase
+        .from("product_variants")
+        .update({ active: false, archived_at: new Date().toISOString() })
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-variants", product.id] });
       qc.invalidateQueries({ queryKey: ["variants", product.id] });
-      toast.success("Variant removed.");
+      toast.success("Variant archived.");
     },
   });
 
@@ -4565,6 +4838,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                   <th className="py-2">Colour</th>
                   <th className="py-2">Price</th>
                   <th className="py-2">Stock</th>
+                  <th className="py-2">Status</th>
                   <th className="py-2" />
                 </tr>
               </thead>
@@ -4585,6 +4859,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                     </td>
                     <td className="py-2">{v.price != null ? inr(v.price) : "—"}</td>
                     <td className={"py-2 " + (v.stock <= 5 ? "text-primary" : "")}>{v.stock}</td>
+                    <td className="py-2">{v.active === false ? "Archived" : "Active"}</td>
                     <td className="flex justify-end gap-2 py-2">
                       <button
                         onClick={() =>
@@ -4596,6 +4871,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                             price: v.price != null ? String(v.price) : "",
                             stock: v.stock,
                             sort_order: v.sort_order,
+                            active: v.active !== false,
                           })
                         }
                         className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs"
@@ -4604,7 +4880,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                       </button>
                       <button
                         onClick={() => {
-                          if (confirm("Remove this variant?")) remove.mutate(v.id);
+                          if (confirm("Archive this variant?")) remove.mutate(v.id);
                         }}
                         className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-destructive"
                       >
@@ -4669,6 +4945,14 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                   onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
                 />
               </Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={draft.active}
+                  onChange={(e) => setDraft({ ...draft, active: e.target.checked })}
+                />
+                Active
+              </label>
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button

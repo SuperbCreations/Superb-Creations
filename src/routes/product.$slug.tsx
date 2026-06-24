@@ -6,6 +6,7 @@ import {
   useProduct,
   useProducts,
   useVariants,
+  useProductImages,
   inr,
   effectivePrice,
   effectiveStock,
@@ -42,6 +43,7 @@ function ProductPage() {
   const { data: product, isLoading } = useProduct(slug);
   const { data: all = [] } = useProducts();
   const { data: variants = [] } = useVariants(product?.id);
+  const { data: productImages = [] } = useProductImages(product?.id);
   const { data: similarProducts = [] } = useSimilarProducts(product);
   const { settings } = useBusinessSettings();
   const { addItem, setOpen } = useCart();
@@ -51,6 +53,7 @@ function ProductPage() {
   const [added, setAdded] = useState(false);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [activeImage, setActiveImage] = useState("");
 
   useEffect(() => {
     if (product?.id) {
@@ -63,6 +66,15 @@ function ProductPage() {
       });
     }
   }, [product?.id, product?.slug, trackViewed, user?.id]);
+
+  useEffect(() => {
+    const cover =
+      productImages.find((image) => image.is_cover)?.image_url ||
+      productImages[0]?.image_url ||
+      product?.image_url ||
+      "";
+    setActiveImage(cover);
+  }, [product?.image_url, productImages]);
 
   if (isLoading) {
     return (
@@ -92,12 +104,19 @@ function ProductPage() {
     .filter((p: any) => p && p.id !== product.id)
     .slice(0, 4);
   const related = (recentProducts.length > 0 ? recentProducts : all.filter((p) => p.id !== product.id)).slice(0, 4);
-  const hasVariants = variants.length > 0;
+  const activeVariants = variants.filter((variant) => variant.active !== false);
+  const hasVariants = activeVariants.length > 0;
+  const galleryImages =
+    productImages.length > 0
+      ? productImages
+      : product.image_url
+        ? [{ id: product.id, image_url: product.image_url, alt_text: product.name, sort_order: 0, is_cover: true }]
+        : [];
 
-  const sizes = Array.from(new Set(variants.map((v) => v.size).filter(Boolean)));
+  const sizes = Array.from(new Set(activeVariants.map((v) => v.size).filter(Boolean)));
   const colors = Array.from(
     new Map(
-      variants
+      activeVariants
         .filter((v) => v.color)
         .map((v) => [v.color, { name: v.color, hex: v.color_hex }]),
     ).values(),
@@ -106,7 +125,7 @@ function ProductPage() {
   const matchVariant = (): Variant | null => {
     if (!hasVariants) return null;
     return (
-      variants.find(
+      activeVariants.find(
         (v) =>
           (sizes.length === 0 || v.size === selectedSize) &&
           (colors.length === 0 || v.color === selectedColor),
@@ -137,12 +156,35 @@ function ProductPage() {
       </div>
 
       <section className="container-boutique grid gap-10 py-8 md:grid-cols-2 md:gap-16 md:py-12">
-        <div className="hover-zoom aspect-[4/5] overflow-hidden rounded-sm bg-secondary shadow-soft">
-          <img
-            src={product.image_url}
-            alt={product.name}
-            className="h-full w-full object-cover"
-          />
+        <div>
+          <div className="hover-zoom aspect-[4/5] overflow-hidden rounded-sm bg-secondary shadow-soft">
+            <img
+              src={activeImage || product.image_url}
+              alt={product.name}
+              className="h-full w-full object-cover"
+            />
+          </div>
+          {galleryImages.length > 1 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto">
+              {galleryImages.map((image) => (
+                <button
+                  key={image.id}
+                  type="button"
+                  onClick={() => setActiveImage(image.image_url)}
+                  className={
+                    "h-20 w-16 shrink-0 overflow-hidden rounded-sm border bg-secondary " +
+                    ((activeImage || product.image_url) === image.image_url ? "border-primary" : "border-border")
+                  }
+                >
+                  <img
+                    src={image.image_url}
+                    alt={image.alt_text || product.name}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="md:py-6">
@@ -164,7 +206,7 @@ function ProductPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {sizes.map((s) => {
                   const active = selectedSize === s;
-                  const anyStock = variants
+                  const anyStock = activeVariants
                     .filter((v) => v.size === s)
                     .some((v) => v.stock > 0);
                   return (
@@ -221,7 +263,7 @@ function ProductPage() {
               disabled={!canBuy}
               onClick={() => {
                 if (hasVariants && !selected) {
-                  toast.error("Please choose size & colour first.");
+                  toast.error("Please choose a size or colour first.");
                   return;
                 }
                 addItem(product, selected);

@@ -3,12 +3,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Product, Variant } from "@/lib/products";
 import { effectivePrice, variantLabel } from "@/lib/products";
 import { trackAnalyticsEvent } from "@/lib/analytics";
+import { useAuth } from "@/lib/auth";
 
 export type CartItem = {
   /** Unique cart key: `${product_id}::${variant_id ?? 'base'}` */
@@ -36,27 +38,73 @@ type CartContextValue = {
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
-const STORAGE_KEY = "sc_cart_v2";
+const GUEST_STORAGE_KEY = "sc_cart_v2:guest";
+const legacyStorageKey = "sc_cart_v2";
+
+const cartStorageKey = (userId?: string) =>
+  userId ? `sc_cart_v2:user:${userId}` : GUEST_STORAGE_KEY;
+
+const readCart = (key: string): CartItem[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeCart = (key: string, items: CartItem[]) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(items));
+  } catch {
+    /* ignore */
+  }
+};
+
+const mergeCartItems = (base: CartItem[], incoming: CartItem[]) => {
+  const merged = new Map<string, CartItem>();
+  for (const item of [...base, ...incoming]) {
+    const existing = merged.get(item.id);
+    merged.set(item.id, existing ? { ...existing, qty: existing.qty + item.qty } : item);
+  }
+  return [...merged.values()];
+};
 
 export function CartProvider({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
   const [items, setItems] = useState<CartItem[]>([]);
   const [isOpen, setOpen] = useState(false);
+  const storageKeyRef = useRef(GUEST_STORAGE_KEY);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setItems(JSON.parse(raw));
-    } catch {
-      /* ignore */
+    if (loading) return;
+
+    const nextKey = cartStorageKey(user?.id);
+    const legacyItems = readCart(legacyStorageKey);
+    const guestItems = readCart(GUEST_STORAGE_KEY);
+    const nextItems = readCart(nextKey);
+    let resolved = nextItems;
+
+    if (legacyItems.length > 0) {
+      resolved = mergeCartItems(resolved, legacyItems);
+      localStorage.removeItem(legacyStorageKey);
     }
-  }, []);
+
+    if (user?.id && guestItems.length > 0) {
+      resolved = mergeCartItems(resolved, guestItems);
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+    }
+
+    storageKeyRef.current = nextKey;
+    loadedRef.current = true;
+    setItems(resolved);
+    writeCart(nextKey, resolved);
+  }, [loading, user?.id]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      /* ignore */
-    }
+    if (!loadedRef.current) return;
+    writeCart(storageKeyRef.current, items);
   }, [items]);
 
   const value = useMemo<CartContextValue>(() => {
@@ -69,6 +117,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
       isOpen,
       setOpen,
       addItem: (product, variant = null, qty = 1) => {
+        const availableStock = variant ? variant.stock : product.stock;
+        if (!product.in_stock || product.active === false || availableStock <= 0 || variant?.active === false) {
+          return;
+        }
         trackAnalyticsEvent({
           eventType: "add_to_cart",
           productId: product.id,
@@ -92,7 +144,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
               slug: product.slug,
               name: product.name,
               price: effectivePrice(product, variant),
-              image_url: product.image_url,
+              image_url: product.cover_image_url || product.image_url,
               qty,
             },
           ];

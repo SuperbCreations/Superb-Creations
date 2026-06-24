@@ -139,6 +139,7 @@ type VariantRow = {
   color: string;
   price: number | null;
   stock: number;
+  active?: boolean;
 };
 
 function variantLabel(variant: Pick<VariantRow, "size" | "color">) {
@@ -395,7 +396,7 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       variantIds.length > 0
         ? await supabaseAdmin
             .from("product_variants")
-            .select("id,product_id,size,color,price,stock")
+            .select("id,product_id,size,color,price,stock,active")
             .in("id", variantIds)
         : { data: [] as VariantRow[], error: null };
     if (variantsResult.error) throw variantsResult.error;
@@ -414,6 +415,9 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       const variant = item.variant_id ? variantsById.get(item.variant_id) : null;
       if (item.variant_id && (!variant || variant.product_id !== product.id)) {
         throw new Error("One or more selected variants are invalid.");
+      }
+      if (variant && variant.active === false) {
+        throw new Error(`${product.name} in ${variantLabel(variant)} is no longer available.`);
       }
 
       const stock = variant ? variant.stock : product.stock;

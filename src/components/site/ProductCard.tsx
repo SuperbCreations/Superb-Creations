@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ShoppingBag, MessageCircle, Star, Heart } from "lucide-react";
-import { type Product, inr } from "@/lib/products";
+import { type Product, inr, useAllVariants } from "@/lib/products";
 import { useCart } from "@/lib/cart";
 import { useAllProductRatings } from "@/lib/reviews";
 import { settingBool, useBusinessSettings, whatsappUrl } from "@/lib/business-settings";
@@ -11,6 +11,7 @@ export function ProductCard({ product }: { product: Product }) {
   const { addItem, setOpen } = useCart();
   const { user } = useAuth();
   const { data: ratings } = useAllProductRatings();
+  const { data: allVariants = [] } = useAllVariants();
   const { settings } = useBusinessSettings();
   const { data: wishlist = [] } = useWishlist(user?.id);
   const toggleWishlist = useToggleWishlist(user?.id);
@@ -18,15 +19,20 @@ export function ProductCard({ product }: { product: Product }) {
   const canOrderOnWhatsapp = settings && settingBool(settings, "enable_whatsapp");
   const wished = wishlist.some((item) => item.product_id === product.id);
 
-  const lowStock = product.in_stock && product.stock > 0 && product.stock <= 5;
-  const outOfStock = !product.in_stock || product.stock === 0;
+  const variants = allVariants.filter((variant) => variant.product_id === product.id);
+  const hasVariants = variants.length > 0;
+  const variantStock = variants.reduce((sum, variant) => sum + Math.max(0, Number(variant.stock || 0)), 0);
+  const availableStock = hasVariants ? variantStock : product.stock;
+  const lowStock = product.in_stock && availableStock > 0 && availableStock <= 5;
+  const outOfStock = !product.in_stock || availableStock === 0;
+  const coverImage = product.cover_image_url || product.image_url;
 
   return (
     <article className="group">
       <div className="hover-zoom relative aspect-[4/5] overflow-hidden bg-secondary">
         <Link to="/product/$slug" params={{ slug: product.slug }}>
           <img
-            src={product.image_url}
+            src={coverImage}
             alt={product.name}
             loading="lazy"
             width={1000}
@@ -64,14 +70,13 @@ export function ProductCard({ product }: { product: Product }) {
             params={{ slug: product.slug }}
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-xs uppercase tracking-[0.18em] text-primary-foreground transition-opacity hover:opacity-90"
             onClick={(e) => {
-              // Quick-add for products without variants
-              if (outOfStock) return;
+              if (outOfStock || hasVariants) return;
               e.preventDefault();
               addItem(product);
               setOpen(true);
             }}
           >
-            <ShoppingBag size={14} /> {outOfStock ? "Sold out" : "Add"}
+            <ShoppingBag size={14} /> {outOfStock ? "Sold out" : hasVariants ? "Select" : "Add"}
           </Link>
           {canOrderOnWhatsapp && (
             <a

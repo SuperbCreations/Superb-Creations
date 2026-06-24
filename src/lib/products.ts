@@ -8,6 +8,7 @@ export type Product = {
   category: string;
   price: number;
   image_url: string;
+  cover_image_url?: string;
   tag: string | null;
   active: boolean;
   description: string;
@@ -47,6 +48,18 @@ export type Variant = {
   low_stock_threshold?: number;
   sku: string | null;
   sort_order: number;
+  active?: boolean;
+};
+
+export type ProductImage = {
+  id: string;
+  product_id: string;
+  image_url: string;
+  alt_text: string;
+  sort_order: number;
+  is_cover: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export const variantLabel = (v: Pick<Variant, "size" | "color">) =>
@@ -70,12 +83,19 @@ export const inr = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN")}`
 async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await publicSupabase
     .from("products")
-    .select("*")
+    .select("*, product_images(image_url,is_cover,sort_order)")
     .eq("active", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as Product[];
+  return (data ?? []).map((product: any) => {
+    const cover = [...(product.product_images ?? [])]
+      .sort((a, b) => Number(b.is_cover) - Number(a.is_cover) || Number(a.sort_order || 0) - Number(b.sort_order || 0))[0];
+    return {
+      ...product,
+      cover_image_url: cover?.image_url || product.image_url,
+    };
+  }) as Product[];
 }
 
 export function useProducts() {
@@ -86,10 +106,11 @@ export function useProduct(slug: string) {
   return useQuery({
     queryKey: ["product", slug],
     queryFn: async () => {
+      const normalizedSlug = decodeURIComponent(slug || "").trim().toLowerCase();
       const { data, error } = await publicSupabase
         .from("products")
         .select("*")
-        .eq("slug", slug)
+        .eq("slug", normalizedSlug)
         .eq("active", true)
         .maybeSingle();
       if (error) throw error;
@@ -107,6 +128,7 @@ export function useVariants(productId: string | undefined) {
         .from("product_variants")
         .select("*")
         .eq("product_id", productId!)
+        .eq("active", true)
         .order("sort_order")
         .order("size");
       if (error) throw error;
@@ -122,9 +144,28 @@ export function useAllVariants() {
       const { data, error } = await publicSupabase
         .from("product_variants")
         .select("*")
+        .eq("active", true)
         .order("sort_order");
       if (error) throw error;
       return (data ?? []) as Variant[];
+    },
+  });
+}
+
+export function useProductImages(productId: string | undefined) {
+  return useQuery({
+    queryKey: ["product-images", productId],
+    enabled: !!productId,
+    queryFn: async (): Promise<ProductImage[]> => {
+      const { data, error } = await publicSupabase
+        .from("product_images")
+        .select("*")
+        .eq("product_id", productId!)
+        .order("is_cover", { ascending: false })
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as ProductImage[];
     },
   });
 }
