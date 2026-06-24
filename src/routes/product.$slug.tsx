@@ -3,7 +3,6 @@ import { MessageCircle, ShoppingBag, ArrowLeft, Check, Star } from "lucide-react
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  useProduct,
   useProducts,
   useVariants,
   useProductImages,
@@ -40,8 +39,18 @@ export const Route = createFileRoute("/product/$slug")({
 
 function ProductPage() {
   const { slug } = useParams({ from: "/product/$slug" });
-  const { data: product, isLoading } = useProduct(slug);
-  const { data: all = [] } = useProducts();
+  const normalizedSlug = useMemo(
+    () => decodeURIComponent(slug || "").trim().toLowerCase(),
+    [slug],
+  );
+  const { data: all = [], isLoading, error: productsError } = useProducts();
+  const product = useMemo(
+    () =>
+      all.find(
+        (item) => String(item.slug || "").trim().toLowerCase() === normalizedSlug,
+      ) ?? null,
+    [all, normalizedSlug],
+  );
   const { data: variants = [] } = useVariants(product?.id);
   const { data: productImages = [] } = useProductImages(product?.id);
   const { data: similarProducts = [] } = useSimilarProducts(product);
@@ -54,6 +63,26 @@ function ProductPage() {
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [activeImage, setActiveImage] = useState("");
+
+  useEffect(() => {
+    if (productsError) {
+      console.error("[product-page] shop product source query failed", {
+        slug,
+        normalizedSlug,
+        error: productsError,
+      });
+    }
+  }, [normalizedSlug, productsError, slug]);
+
+  useEffect(() => {
+    if (!isLoading && !product) {
+      console.error("[product-page] product not found in shop product source", {
+        slug,
+        normalizedSlug,
+        availableSlugs: all.map((item) => item.slug),
+      });
+    }
+  }, [all, isLoading, normalizedSlug, product, slug]);
 
   useEffect(() => {
     if (product?.id) {
