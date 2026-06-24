@@ -31,14 +31,20 @@ export function ProductCard({ product }: { product: Product }) {
     <article className="group">
       <div className="hover-zoom relative aspect-[4/5] overflow-hidden bg-secondary">
         <Link to="/product/$slug" params={{ slug: product.slug }}>
-          <img
-            src={coverImage}
-            alt={product.name}
-            loading="lazy"
-            width={1000}
-            height={1300}
-            className="h-full w-full object-cover"
-          />
+          {coverImage ? (
+            <img
+              src={coverImage}
+              alt={product.name}
+              loading="lazy"
+              width={1000}
+              height={1300}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center px-6 text-center text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              Image coming soon
+            </div>
+          )}
         </Link>
         {product.tag && (
           <span className="absolute left-3 top-3 rounded-full bg-background/90 px-3 py-1 text-[0.65rem] uppercase tracking-[0.2em]">

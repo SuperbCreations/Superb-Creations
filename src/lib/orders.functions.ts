@@ -74,6 +74,10 @@ const expireUpiOrderSchema = z.object({
   orderId: z.string().uuid(),
 });
 
+const whatsappMessageSentSchema = z.object({
+  orderId: z.string().uuid(),
+});
+
 const updateOrderOperationsSchema = z.object({
   orderId: z.string().uuid(),
   accessToken: z.string().min(20),
@@ -470,21 +474,21 @@ export const createCheckoutOrder = createServerFn({ method: "POST" })
       bank_transfer: "awaiting_payment",
       cod: "cod_pending",
       razorpay: "pending",
-      whatsapp: "pending",
+      whatsapp: "pending_whatsapp_confirmation",
     };
     const initialStatus: Record<string, string> = {
       upi: "awaiting_payment",
       bank_transfer: "awaiting_payment",
       cod: "cod_pending",
       razorpay: "payment_pending",
-      whatsapp: "new",
+      whatsapp: "awaiting_customer_message",
     };
     const initialOperationalStatus: Record<string, string> = {
       upi: "payment_pending",
       bank_transfer: "payment_pending",
       cod: "cod_pending",
       razorpay: "payment_pending",
-      whatsapp: "order_created",
+      whatsapp: "whatsapp_pending",
     };
 
     const { data: order, error: orderError } = await supabaseAdmin
@@ -1050,17 +1054,93 @@ export const adjustInventoryStock = createServerFn({ method: "POST" })
   .inputValidator((data) => adjustInventorySchema.parse(data))
   .handler(async ({ data }) => {
     const { requireOwnerAdmin } = await import("@/lib/admin.server");
-    await requireOwnerAdmin(data.accessToken);
+    const adminUser = await requireOwnerAdmin(data.accessToken);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: result, error } = await supabaseAdmin.rpc("adjust_inventory_stock", {
-      p_product_id: data.productId,
-      p_variant_id: data.variantId || null,
-      p_quantity: data.quantity,
-      p_movement_type: data.movementType,
-      p_note: data.note || null,
+    const table = data.variantId ? "product_variants" : "products";
+    const query = supabaseAdmin
+      .from(table)
+      .select("id,stock,damaged_stock,returned_stock")
+      .eq("id", data.variantId || data.productId);
+    const { data: current, error: currentError } = data.variantId
+      ? await query.eq("product_id", data.productId).maybeSingle()
+      : await query.maybeSingle();
+    if (currentError) {
+      console.error("[inventory] stock lookup failed", currentError);
+      throw currentError;
+    }
+    if (!current) throw new Error("Product or variant was not found.");
+
+    const previousStock = Number(current.stock || 0);
+    const newStock = Math.max(previousStock + data.quantity, 0);
+    const patch: Record<string, unknown> = { stock: newStock };
+    if (data.movementType === "damaged") {
+      patch.damaged_stock = Number(current.damaged_stock || 0) + Math.abs(data.quantity);
+    }
+    if (data.movementType === "returned") {
+      patch.returned_stock = Number(current.returned_stock || 0) + Math.abs(data.quantity);
+    }
+
+    const update = supabaseAdmin
+      .from(table)
+      .update(patch)
+      .eq("id", data.variantId || data.productId);
+    const { error: updateError } = data.variantId
+      ? await update.eq("product_id", data.productId)
+      : await update;
+    if (updateError) {
+      console.error("[inventory] stock update failed", updateError);
+      throw updateError;
+    }
+
+    const { error: eventError } = await supabaseAdmin.from("inventory_events").insert({
+      product_id: data.productId,
+      variant_id: data.variantId || null,
+      order_id: null,
+      movement_type: data.movementType,
+      quantity: data.quantity,
+      previous_stock: previousStock,
+      new_stock: newStock,
+      note: data.note || null,
+      actor_id: adminUser.id,
     });
+    if (eventError) console.warn("[inventory] event logging failed", eventError);
+    return { ok: true, previous_stock: previousStock, new_stock: newStock };
+  });
+
+export const markWhatsappMessageSent = createServerFn({ method: "POST" })
+  .inputValidator((data) => whatsappMessageSentSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from("orders")
+      .select("id,payment_method,status,operational_status")
+      .eq("id", data.orderId)
+      .maybeSingle();
+    if (orderError) throw orderError;
+    if (!order || order.payment_method !== "whatsapp") {
+      throw new Error("WhatsApp order draft was not found.");
+    }
+    if (!["whatsapp_pending", "awaiting_customer_message", "pending_whatsapp_confirmation", "new"].includes(order.status || "")) {
+      return { ok: true, alreadyUpdated: true };
+    }
+    const { error } = await supabaseAdmin
+      .from("orders")
+      .update({
+        status: "customer_claimed_sent",
+        operational_status: "pending_whatsapp_confirmation",
+        payment_status: "pending_whatsapp_confirmation",
+      })
+      .eq("id", data.orderId)
+      .eq("payment_method", "whatsapp");
     if (error) throw error;
-    return result;
+    await supabaseAdmin.rpc("append_order_event", {
+      p_order_id: data.orderId,
+      p_event_type: "whatsapp_message_claimed_sent",
+      p_label: "Customer marked WhatsApp message as sent",
+      p_details: {},
+      p_visible_to_customer: true,
+    });
+    return { ok: true };
   });
 
 export const bulkUpdateOrders = createServerFn({ method: "POST" })

@@ -136,13 +136,13 @@ function ProductPage() {
   const selected = matchVariant();
   const price = effectivePrice(product, selected);
   const stock = effectiveStock(product, selected);
+  const needsSize = hasVariants && sizes.length > 0;
+  const needsColor = hasVariants && colors.length > 0;
   const canOrderOnWhatsapp = settings && settingBool(settings, "enable_whatsapp");
   const canBuy =
     product.in_stock &&
     stock > 0 &&
-    (!hasVariants ||
-      (sizes.length === 0 || !!selectedSize) &&
-        (colors.length === 0 || !!selectedColor));
+    (!hasVariants || Boolean(selected));
 
   return (
     <>
@@ -158,11 +158,17 @@ function ProductPage() {
       <section className="container-boutique grid gap-10 py-8 md:grid-cols-2 md:gap-16 md:py-12">
         <div>
           <div className="hover-zoom aspect-[4/5] overflow-hidden rounded-sm bg-secondary shadow-soft">
-            <img
-              src={activeImage || product.image_url}
-              alt={product.name}
-              className="h-full w-full object-cover"
-            />
+            {activeImage || product.image_url ? (
+              <img
+                src={activeImage || product.image_url}
+                alt={product.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center px-8 text-center text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Image coming soon
+              </div>
+            )}
           </div>
           {galleryImages.length > 1 && (
             <div className="mt-3 flex gap-2 overflow-x-auto">
@@ -208,12 +214,19 @@ function ProductPage() {
                   const active = selectedSize === s;
                   const anyStock = activeVariants
                     .filter((v) => v.size === s)
+                    .filter((v) => !needsColor || !selectedColor || v.color === selectedColor)
                     .some((v) => v.stock > 0);
                   return (
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setSelectedSize(s)}
+                      onClick={() => {
+                        setSelectedSize(s);
+                        if (selectedColor) {
+                          const stillValid = activeVariants.some((v) => v.size === s && v.color === selectedColor && v.stock > 0);
+                          if (!stillValid) setSelectedColor(null);
+                        }
+                      }}
                       disabled={!anyStock}
                       className={
                         "min-w-[44px] rounded-full border px-4 py-2 text-xs uppercase tracking-[0.18em] transition-colors " +
@@ -239,15 +252,27 @@ function ProductPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {colors.map((c) => {
                   const active = selectedColor === c.name;
+                  const anyStock = activeVariants
+                    .filter((v) => v.color === c.name)
+                    .filter((v) => !needsSize || !selectedSize || v.size === selectedSize)
+                    .some((v) => v.stock > 0);
                   return (
                     <button
                       key={c.name}
                       type="button"
                       title={c.name}
-                      onClick={() => setSelectedColor(c.name)}
+                      onClick={() => {
+                        setSelectedColor(c.name);
+                        if (selectedSize) {
+                          const stillValid = activeVariants.some((v) => v.color === c.name && v.size === selectedSize && v.stock > 0);
+                          if (!stillValid) setSelectedSize(null);
+                        }
+                      }}
+                      disabled={!anyStock}
                       className={
                         "h-9 w-9 rounded-full border-2 transition-transform " +
-                        (active ? "border-primary scale-110" : "border-border")
+                        (active ? "border-primary scale-110" : "border-border") +
+                        (!anyStock ? " opacity-40" : "")
                       }
                       style={{ backgroundColor: c.hex ?? "#ccc" }}
                     />
@@ -263,7 +288,13 @@ function ProductPage() {
               disabled={!canBuy}
               onClick={() => {
                 if (hasVariants && !selected) {
-                  toast.error("Please choose a size or colour first.");
+                  toast.error(
+                    needsSize && needsColor
+                      ? "Please choose an available size and colour."
+                      : needsSize
+                        ? "Please choose an available size."
+                        : "Please choose an available colour.",
+                  );
                   return;
                 }
                 addItem(product, selected);

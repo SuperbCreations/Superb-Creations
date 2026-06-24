@@ -10,7 +10,7 @@ const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inac
 const visibleProducts = (query: any) =>
   query
     .eq("active", true)
-    .not("product_status", "in", `(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
+    .or(`product_status.is.null,product_status.not.in.(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
 
 export type BlogCategory = {
   id: string;

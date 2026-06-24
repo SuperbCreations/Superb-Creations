@@ -45,7 +45,7 @@ export const Route = createFileRoute("/sitemap.xml")({
             .from("products")
             .select("slug")
             .eq("active", true)
-            .not("product_status", "in", "(archived,deleted,draft,hidden,inactive)");
+            .or("product_status.is.null,product_status.not.in.(archived,deleted,draft,hidden,inactive)");
           for (const p of data ?? []) {
             entries.push({ path: `/product/${p.slug}`, changefreq: "weekly", priority: "0.8" });
           }

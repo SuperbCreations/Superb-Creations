@@ -650,6 +650,108 @@ const testEmailSchema = z.object({
   to: z.string().email(),
 });
 
+const welcomeEmailSchema = z.object({
+  accessToken: z.string().min(20),
+});
+
+export const ensureWelcomeEmailForUser = createServerFn({ method: "POST" })
+  .inputValidator((data) => welcomeEmailSchema.parse(data))
+  .handler(async ({ data }) => {
+    const { createClient } = await import("@supabase/supabase-js");
+    const { getSupabaseServerEnv } = await import("@/lib/env.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authEnv = getSupabaseServerEnv();
+    if (!authEnv.url || !authEnv.publishableKey) {
+      console.warn("[welcome-email] Supabase auth env missing; welcome email check skipped");
+      return { ok: false, skipped: true, reason: "auth_env_missing" };
+    }
+    const authClient = createClient(authEnv.url, authEnv.publishableKey, {
+      auth: {
+        storage: undefined,
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+    const { data: userResult, error: userError } = await authClient.auth.getUser(data.accessToken);
+    if (userError || !userResult.user?.email) {
+      return { ok: false, skipped: true, reason: "user_not_available" };
+    }
+
+    const user = userResult.user;
+    const idempotencyKey = `welcome:${user.id}`;
+    const { data: existing, error: existingError } = await (supabaseAdmin as any)
+      .from("email_queue")
+      .select("id,status")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    if (!existing) {
+      const name =
+        String(user.user_metadata?.full_name || user.user_metadata?.name || "").trim() ||
+        user.email.split("@")[0] ||
+        "there";
+      const { error: insertError } = await (supabaseAdmin as any).from("email_queue").insert({
+        recipient: user.email.toLowerCase(),
+        user_id: user.id,
+        template_key: "welcome",
+        subject: "Welcome to Superb Creations",
+        variables: {
+          customer_name: name,
+          store_name: "Superb Creations",
+          user_email: user.email.toLowerCase(),
+        },
+        status: "queued",
+        next_attempt_at: new Date().toISOString(),
+        idempotency_key: idempotencyKey,
+        max_attempts: 5,
+      });
+      if (insertError) throw insertError;
+    }
+
+    const { data: queueRow } = await (supabaseAdmin as any)
+      .from("email_queue")
+      .select("*")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    if (!queueRow || queueRow.status === "sent") {
+      return { ok: true, queued: Boolean(queueRow), status: queueRow?.status || "missing" };
+    }
+
+    try {
+      const send = await sendTemplatedEmail({
+        templateKey: queueRow.template_key || "welcome",
+        to: queueRow.recipient,
+        variables: queueRow.variables ?? {},
+        idempotencyKey,
+      });
+      await (supabaseAdmin as any)
+        .from("email_queue")
+        .update({
+          status: send.ok ? "sent" : "failed",
+          attempts: Number(queueRow.attempts || 0) + 1,
+          last_error: send.ok ? null : ((send as any).error || "Welcome email send skipped or failed"),
+          next_attempt_at: send.ok ? queueRow.next_attempt_at : new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", queueRow.id);
+      return { ok: send.ok, queued: true, status: send.ok ? "sent" : "failed" };
+    } catch (error) {
+      await (supabaseAdmin as any)
+        .from("email_queue")
+        .update({
+          status: "failed",
+          attempts: Number(queueRow.attempts || 0) + 1,
+          last_error: error instanceof Error ? error.message.slice(0, 1000) : "Welcome email send failed",
+          next_attempt_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", queueRow.id);
+      console.warn("[welcome-email] send failed; queued for retry", error);
+      return { ok: false, queued: true, status: "failed" };
+    }
+  });
+
 export const sendBrevoTestEmail = createServerFn({ method: "POST" })
   .inputValidator((data) => testEmailSchema.parse(data))
   .handler(async ({ data }) => {

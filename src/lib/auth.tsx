@@ -5,9 +5,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { ensureWelcomeEmailForUser } from "@/lib/notifications.functions";
 
 const OWNER_ADMIN_EMAIL = "superbcreations55@gmail.com";
 const BUSINESS_SETTINGS_QUERY_KEY = ["business-settings"] as const;
@@ -36,6 +38,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const ensureWelcomeEmail = useServerFn(ensureWelcomeEmailForUser);
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -69,6 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => sub.subscription.unsubscribe();
   }, [queryClient]);
+
+  useEffect(() => {
+    if (!session?.access_token || !user?.id) return;
+    ensureWelcomeEmail({ data: { accessToken: session.access_token } }).catch((error) => {
+      console.warn("[welcome-email] background check failed", error);
+    });
+  }, [ensureWelcomeEmail, session?.access_token, user?.id]);
 
   const signOut = async () => {
     await supabase.auth.signOut({ scope: "local" });

@@ -550,6 +550,8 @@ export type Database = {
       }
       product_variants: {
         Row: {
+          active: boolean
+          archived_at: string | null
           color: string
           color_hex: string | null
           created_at: string
@@ -568,6 +570,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          active?: boolean
+          archived_at?: string | null
           color?: string
           color_hex?: string | null
           created_at?: string
@@ -586,6 +590,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          active?: boolean
+          archived_at?: string | null
           color?: string
           color_hex?: string | null
           created_at?: string

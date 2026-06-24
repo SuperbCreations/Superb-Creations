@@ -109,6 +109,12 @@ function Checkout() {
   const verifyRazorpay = useServerFn(verifyRazorpayPayment);
   const failRazorpay = useServerFn(markRazorpayPaymentFailed);
 
+  useEffect(() => {
+    if (paymentMethodsError) {
+      console.error("[checkout] payment methods could not be loaded", paymentMethodsError);
+    }
+  }, [paymentMethodsError]);
+
   const checkoutSettings = settings;
   const checkoutEnabled = settingBool(checkoutSettings, "enable_checkout");
   const whatsappEnabled = settingBool(checkoutSettings, "enable_whatsapp");
@@ -486,7 +492,14 @@ function Checkout() {
         const url = whatsappUrl(checkoutSettings, orderSummaryText(order));
         clear();
         window.open(url, "_blank");
-        navigate({ to: "/order-success", search: { method: "whatsapp" } });
+        navigate({
+          to: "/order-success",
+          search: {
+            method: "whatsapp",
+            order: order.orderId,
+            status: "awaiting_customer_message",
+          },
+        });
         return;
       }
 

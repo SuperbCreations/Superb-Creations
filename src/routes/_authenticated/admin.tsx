@@ -985,7 +985,10 @@ function ProductsAdmin() {
       qc.invalidateQueries({ queryKey: ["products"] });
       toast.success("Stock adjusted and logged.");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not adjust stock."),
+    onError: (e) => {
+      console.error("[admin-products] stock adjustment failed", e);
+      toast.error(e instanceof Error ? e.message : "Could not adjust stock.");
+    },
   });
 
   const bulkProducts = useMutation({
@@ -4576,7 +4579,10 @@ function ProductImagesManager({
         sort_order: images.length,
         is_cover: firstImage,
       });
-      if (error) throw error;
+      if (error) {
+        console.error("[admin-products] product image insert failed", error);
+        throw error;
+      }
       if (firstImage) onCoverChange(imageUrl);
     },
     onSuccess: () => {
@@ -4590,7 +4596,10 @@ function ProductImagesManager({
   const updateImage = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<ProductImage> }) => {
       const { error } = await supabase.from("product_images").update(patch).eq("id", id);
-      if (error) throw error;
+      if (error) {
+        console.error("[admin-products] product image update failed", error);
+        throw error;
+      }
       if (patch.is_cover && patch.image_url) onCoverChange(patch.image_url);
     },
     onSuccess: () => {
@@ -4603,7 +4612,10 @@ function ProductImagesManager({
   const removeImage = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("product_images").delete().eq("id", id);
-      if (error) throw error;
+      if (error) {
+        console.error("[admin-products] product image delete failed", error);
+        throw error;
+      }
     },
     onSuccess: () => {
       refresh();
@@ -4612,19 +4624,26 @@ function ProductImagesManager({
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not remove image."),
   });
 
-  const uploadGalleryImage = async (file: File) => {
+  const uploadGalleryImages = async (files: File[]) => {
     setUploading(true);
     try {
-      if (!file.type.startsWith("image/")) throw new Error("Please upload an image file.");
-      if (file.size > 5 * 1024 * 1024) throw new Error("Image must be 5MB or smaller.");
-      const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `products/${product.id}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage
-        .from("product-images")
-        .upload(path, file, { cacheControl: "31536000", upsert: false });
-      if (error) throw error;
-      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
-      await addImage.mutateAsync(data.publicUrl);
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) throw new Error("Please upload image files only.");
+        if (file.size > 5 * 1024 * 1024) throw new Error("Each image must be 5MB or smaller.");
+      }
+      for (const file of files) {
+        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `products/${product.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage
+          .from("product-images")
+          .upload(path, file, { cacheControl: "31536000", upsert: false });
+        if (error) {
+          console.error("[admin-products] product image upload failed", error);
+          throw error;
+        }
+        const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+        await addImage.mutateAsync(data.publicUrl);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -4642,11 +4661,12 @@ function ProductImagesManager({
           <input
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
             disabled={uploading}
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) uploadGalleryImage(file);
+              const files = Array.from(e.target.files ?? []);
+              if (files.length > 0) uploadGalleryImages(files);
             }}
           />
         </label>
@@ -4743,16 +4763,20 @@ type VariantDraft = {
   color: string;
   color_hex: string;
   price: string; // optional override, blank = use product price
+  sku: string;
   stock: number;
   sort_order: number;
   active: boolean;
 };
+
+const PRESET_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "Free Size"];
 
 const emptyVariantDraft = (): VariantDraft => ({
   size: "",
   color: "",
   color_hex: "",
   price: "",
+  sku: "",
   stock: 0,
   sort_order: 0,
   active: true,
@@ -4779,12 +4803,19 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
 
   const save = useMutation({
     mutationFn: async (d: VariantDraft) => {
+      if (!d.size.trim() && !d.color.trim()) {
+        throw new Error("Add a size, colour, or both for this variant.");
+      }
+      if (d.color_hex.trim() && !/^#[0-9a-fA-F]{6}$/.test(d.color_hex.trim())) {
+        throw new Error("Colour hex must look like #AABBCC.");
+      }
       const payload = {
         product_id: product.id,
         size: d.size.trim(),
         color: d.color.trim(),
         color_hex: d.color_hex.trim() || null,
         price: d.price.trim() === "" ? null : Math.max(0, Math.round(Number(d.price))),
+        sku: d.sku.trim() || null,
         stock: Math.max(0, Math.round(d.stock || 0)),
         sort_order: d.sort_order,
         active: d.active,
@@ -4795,10 +4826,16 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
           .from("product_variants")
           .update(payload)
           .eq("id", d.id);
-        if (error) throw error;
+        if (error) {
+          console.error("[admin-products] variant update failed", error);
+          throw error;
+        }
       } else {
         const { error } = await supabase.from("product_variants").insert(payload);
-        if (error) throw error;
+        if (error) {
+          console.error("[admin-products] variant insert failed", error);
+          throw error;
+        }
       }
     },
     onSuccess: () => {
@@ -4807,7 +4844,10 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
       setDraft(null);
       toast.success("Variant saved.");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save."),
+    onError: (e) => {
+      console.error("[admin-products] variant save failed", e);
+      toast.error(e instanceof Error ? e.message : "Could not save variant.");
+    },
   });
 
   const remove = useMutation({
@@ -4816,7 +4856,10 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
         .from("product_variants")
         .update({ active: false, archived_at: new Date().toISOString() })
         .eq("id", id);
-      if (error) throw error;
+      if (error) {
+        console.error("[admin-products] variant archive failed", error);
+        throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-variants", product.id] });
@@ -4861,6 +4904,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                 <tr className="border-b border-border text-left text-[0.65rem] uppercase tracking-[0.15em] text-muted-foreground">
                   <th className="py-2">Size</th>
                   <th className="py-2">Colour</th>
+                  <th className="py-2">SKU</th>
                   <th className="py-2">Price</th>
                   <th className="py-2">Stock</th>
                   <th className="py-2">Status</th>
@@ -4882,6 +4926,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                         {v.color || "—"}
                       </span>
                     </td>
+                    <td className="py-2">{v.sku || "—"}</td>
                     <td className="py-2">{v.price != null ? inr(v.price) : "—"}</td>
                     <td className={"py-2 " + (v.stock <= 5 ? "text-primary" : "")}>{v.stock}</td>
                     <td className="py-2">{v.active === false ? "Archived" : "Active"}</td>
@@ -4894,6 +4939,7 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                             color: v.color,
                             color_hex: v.color_hex ?? "",
                             price: v.price != null ? String(v.price) : "",
+                            sku: v.sku ?? "",
                             stock: v.stock,
                             sort_order: v.sort_order,
                             active: v.active !== false,
@@ -4922,13 +4968,34 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
         {draft && (
           <div className="mt-6 rounded-sm border border-border bg-secondary/30 p-5">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Size (e.g. S, M, L, Free Size)">
-                <input
+              <Field label="Size">
+                <select
                   className={inputCls}
-                  value={draft.size}
-                  onChange={(e) => setDraft({ ...draft, size: e.target.value })}
-                />
+                  value={draft.size === "" ? "" : PRESET_SIZES.includes(draft.size) ? draft.size : "__custom"}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      size: e.target.value === "__custom" ? "" : e.target.value,
+                    })
+                  }
+                >
+                  <option value="">No size</option>
+                  {PRESET_SIZES.map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                  <option value="__custom">Custom size</option>
+                </select>
               </Field>
+              {!PRESET_SIZES.includes(draft.size) && (
+                <Field label="Custom size">
+                  <input
+                    className={inputCls}
+                    placeholder="e.g. 3XL, 38, Petite"
+                    value={draft.size}
+                    onChange={(e) => setDraft({ ...draft, size: e.target.value })}
+                  />
+                </Field>
+              )}
               <Field label="Colour name">
                 <input
                   className={inputCls}
@@ -4960,6 +5027,13 @@ function VariantsEditor({ product, onClose }: { product: Product; onClose: () =>
                   min={0}
                   value={draft.stock}
                   onChange={(e) => setDraft({ ...draft, stock: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="SKU (optional)">
+                <input
+                  className={inputCls}
+                  value={draft.sku}
+                  onChange={(e) => setDraft({ ...draft, sku: e.target.value })}
                 />
               </Field>
               <Field label="Order">

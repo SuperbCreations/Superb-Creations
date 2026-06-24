@@ -59,10 +59,13 @@ export function usePaymentMethods() {
     queryFn: async (): Promise<PaymentMethod[]> => {
       const { data, error } = await publicDb
         .from("payment_methods")
-        .select("method_key,display_name,description,instructions,verification_time,enabled,min_order_amount,max_order_amount,extra_fee,sort_order,recommended,provider,public_details")
+        .select("*")
         .eq("enabled", true)
         .order("sort_order");
-      if (error) throw error;
+      if (error) {
+        console.error("[payments] enabled payment_methods query failed", error);
+        throw error;
+      }
       return (data ?? [])
         .map(normalizePaymentMethod)
         .filter((method): method is PaymentMethod => Boolean(method));

@@ -85,7 +85,7 @@ const HIDDEN_PRODUCT_STATUSES = ["archived", "deleted", "draft", "hidden", "inac
 const visibleProductQuery = (query: any) =>
   query
     .eq("active", true)
-    .not("product_status", "in", `(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
+    .or(`product_status.is.null,product_status.not.in.(${HIDDEN_PRODUCT_STATUSES.join(",")})`);
 
 async function fetchProducts(): Promise<Product[]> {
   const query = publicSupabase
@@ -170,7 +170,10 @@ export function useProductImages(productId: string | undefined) {
         .order("is_cover", { ascending: false })
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
-      if (error) throw error;
+      if (error) {
+        console.error("[products] product_images query failed", { productId, error });
+        return [];
+      }
       return (data ?? []) as ProductImage[];
     },
   });

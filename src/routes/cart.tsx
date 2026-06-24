@@ -36,7 +36,9 @@ function CartPage() {
                   params={{ slug: item.slug }}
                   className="h-28 w-24 shrink-0 overflow-hidden rounded-sm bg-secondary"
                 >
-                  <img src={item.image_url} alt={item.name} className="h-full w-full object-cover" />
+                  {item.image_url && (
+                    <img src={item.image_url} alt={item.name} className="h-full w-full object-cover" />
+                  )}
                 </Link>
                 <div className="flex flex-1 flex-col">
                   <div className="flex justify-between gap-3">
